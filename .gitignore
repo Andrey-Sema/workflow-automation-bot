@@ -20,3 +20,8 @@ __pycache__/
 # Данные (если у тебя есть тяжелые CSV или логи)
 *.log
 data/*.csv
+
+# Игнорируем сырые и обработанные данные
+src/data/input/
+src/data/output/
+src/data/processed/
