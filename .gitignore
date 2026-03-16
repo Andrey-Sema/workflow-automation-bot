@@ -1,27 +1,36 @@
-# Окружение (самое тяжелое и ненужное на Гите)
-venv/
+# === Окружение ===
+.venv/
 ENV/
 env/
 
-# Секреты (САМОЕ ВАЖНОЕ)
+# === Секреты (САМОЕ ВАЖНОЕ) ===
 .env
 
-# Мусор PyCharm и системы
+# === Мусор PyCharm и системы ===
 .idea/
 .vscode/
 .DS_Store
+Thumbs.db
 
-# Кэш Python
+# === Кэш Python ===
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+.pytest_cache/
 
-# Данные (если у тебя есть тяжелые CSV или логи)
+# === Дебаг, логи и скриншоты ===
 *.log
-data/*.csv
+debug_screenshots/
 
-# Игнорируем сырые и обработанные данные
-src/data/input/
-src/data/output/
-src/data/processed/
+# === Данные и базы ===
+*.csv
+data/input/
+data/output/
+data/processed/
+*.sqlite3
+*.db
+
+# === Шаблоны (Исключения) ===
+# Если у тебя в data/templates лежат картинки для кнопок 1С,
+# они ДОЛЖНЫ лететь в гит, поэтому папку data мы не игнорим целиком.

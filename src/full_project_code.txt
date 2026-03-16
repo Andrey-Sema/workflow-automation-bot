@@ -1,0 +1,985 @@
+
+
+====================
+FILE: src\agent_booked_ocr.py
+====================
+
+import pyautogui
+import io
+import logging
+import json
+from PIL import Image
+import google.generativeai as genai
+import time
+import re
+from typing import List, Dict, Any
+from pathlib import Path
+from datetime import datetime
+
+logger = logging.getLogger(__name__)
+
+# 🔥 ЖЕСТКО ЗАШИТАЯ МОДЕЛЬ ДЛЯ АГЕНТА №3 🔥
+BOOKED_MODEL = genai.GenerativeModel('gemini-3.1-flash-lite-preview')
+MAX_DIM = 2048
+DEBUG_DIR = Path("debug_screenshots")
+
+
+def clean_json_response(text: str) -> str:
+    """Извлекает JSON-массив из текстового ответа ИИ."""
+    match = re.search(r"\[.*\]", text, re.DOTALL)
+    if match:
+        return match.group()
+    return text.strip()
+
+
+def safe_int(value: Any, default: int = 0) -> int:
+    """Безопасное преобразование в int. Жрет пробелы, запятые и валюты."""
+    if value is None:
+        return default
+
+    if isinstance(value, (int, float)):
+        return int(value)
+
+    if isinstance(value, str):
+        # Убираем неразрывные пробелы и меняем запятую на точку
+        cleaned = re.sub(r'\s+', '', value.replace(',', '.'))
+        # Вырезаем любой мусор типа "грн", "руб", значки валют
+        cleaned = re.sub(r'[₴₽$€]|\b(грн|руб|usd|eur)\b', '', cleaned, flags=re.I)
+        try:
+            return int(float(cleaned))
+        except ValueError:
+            return default
+
+    return default
+
+
+def clean_service_name(name: Any) -> str:
+    """Очищает название услуги от мусора."""
+    if not isinstance(name, str):
+        name = str(name)
+    # Убираем маркеры списка в начале
+    name = re.sub(r'^[\s\d]*[-\*\.]\s*', '', name.strip())
+    # Убираем кавычки разного типа
+    name = name.strip('"\'«»„“')
+    # Нормализуем пробелы
+    name = re.sub(r'\s+', ' ', name)
+    # Убираем висячие дефисы в конце
+    name = re.sub(r'[-–—]\s*$', '', name)
+    return name.strip()
+
+
+def validate_items(items: List[Dict]) -> List[Dict]:
+    """Валидирует услуги, чистит числа и проверяет математику."""
+    valid = []
+    seen_names = set()
+
+    for item in items:
+        if not isinstance(item, dict):
+            logger.warning(f"⚠️ Пропущен не-словарь от ИИ: {item}")
+            continue
+
+        name = clean_service_name(item.get("name", ""))
+
+        # Защита от короткого мусора и строк без букв
+        if len(name) < 3 or not any(c.isalpha() for c in name):
+            continue
+
+        if name in seen_names:
+            continue
+
+        # Бронебойный парсинг чисел
+        qty = safe_int(item.get("quantity", 1), default=1)
+        price = safe_int(item.get("price", 0), default=0)
+        total = safe_int(item.get("sum", 0), default=0)
+
+        # Математический sanity check (проверка на вменяемость ИИ)
+        if qty > 0 and price > 0:
+            expected_sum = qty * price
+            if expected_sum != total and total > 0:
+                logger.warning(
+                    f"⚠️ ИИ ошибся в математике для '{name}': {qty} * {price} != {total}. Доверяем умножению.")
+                total = expected_sum  # Исправляем косяк нейронки
+
+        # Защита от диких цен
+        if price > 200000:
+            logger.warning(f"⚠️ Подозрительно высокая цена {price} для '{name}'. Проверь глазами!")
+
+        valid.append({
+            "name": name,
+            "quantity": max(1, qty),  # Меньше 1 быть не может
+            "price": max(0, price),
+            "sum": max(0, total)
+        })
+        seen_names.add(name)
+
+    return valid
+
+
+def get_booked_items_via_screenshot() -> List[Dict[str, Any]]:
+    """Агент №3: читает брони (имя, кол-во, цену, сумму) с экрана через OCR."""
+    logger.info("👁️ Агент №3 (Визуальный Ниндзя) активирован...")
+
+    print("\n" + "=" * 70)
+    print("⚠️ ВИЗУАЛЬНОЕ СКАНИРОВАНИЕ 1С ⚠️")
+    print("1. Нажми Enter в этой консоли.")
+    print("2. Быстро разверни окно удаленки с 1С на весь экран.")
+    print("3. Убедись, что таблицу с бронями ХОРОШО ВИДНО.")
+    print("4. Убирай руки от мышки.")
+    print("=" * 70)
+
+    input("👉 Нажми Enter и выведи табличку 1С на экран... ")
+
+    # Обратный отсчёт
+    for i in range(3, 0, -1):
+        logger.info(f"⏳ {i}...")
+        time.sleep(1)
+    logger.info("📸 ФОТОГРАФИРУЮ ЭКРАН!")
+
+    try:
+        # Делаем скриншот
+        full_screen_img = pyautogui.screenshot()
+
+        # Сохраняем скриншот для дебага
+        DEBUG_DIR.mkdir(exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        debug_path = DEBUG_DIR / f"screenshot_{timestamp}.jpg"
+        full_screen_img.save(debug_path, format='JPEG', quality=90)
+        logger.info(f"📸 Скриншот сохранён: {debug_path}")
+
+        # Оптимизация для отправки
+        img_byte_arr = io.BytesIO()
+        if max(full_screen_img.size) > MAX_DIM:
+            full_screen_img.thumbnail((MAX_DIM, MAX_DIM), Image.Resampling.LANCZOS)
+        full_screen_img.save(img_byte_arr, format='JPEG', quality=85, optimize=True)
+        optimized_bytes = img_byte_arr.getvalue()
+
+        logger.info(f"📤 Отправляю {len(optimized_bytes) / 1024:.1f} KB в Gemini 3.1...")
+
+        # Промпт для ИИ
+        prompt = """
+        Ты — AI-сканер интерфейса 1С. Твоя задача найти таблицу с услугами на скриншоте.
+        Для каждой строки в таблице извлеки 4 параметра:
+        1. "name" — Название услуги (колонка Номенклатура или Наименование).
+        2. "quantity" — Количество.
+        3. "price" — Цена.
+        4. "sum" — Сумма.
+
+        ВАЖНО:
+        - Игнорируй заголовки столбцов и общую строку "Итого" в самом низу.
+        - Верни результат СТРОГО в формате JSON-массива. Никаких лишних слов или маркеров Markdown.
+
+        Пример правильного ответа:
+        [
+          {"name": "Труна (Глянцева) №2", "quantity": 1, "price": 3000, "sum": 3000},
+          {"name": "БОКС", "quantity": 1, "price": 400, "sum": 400}
+        ]
+        """
+
+        # Запрос к ИИ
+        response = BOOKED_MODEL.generate_content([prompt, {
+            "mime_type": "image/jpeg",
+            "data": optimized_bytes
+        }])
+
+        raw_text = clean_json_response(response.text)
+        if not raw_text or raw_text == "[]":
+            logger.warning("⚠️ Пустой ответ от ИИ или не найдено услуг. Смотри скриншот в debug_screenshots!")
+            return []
+
+        # Парсим JSON
+        try:
+            raw_items = json.loads(raw_text)
+            if not isinstance(raw_items, list):
+                raise ValueError("Ожидался список JSON")
+        except json.JSONDecodeError as e:
+            logger.error(f"❌ Нейронка выдала кривой JSON: {e}\nТекст: {raw_text}")
+            return []
+
+        # Валидируем и чистим
+        items = validate_items(raw_items)
+
+        logger.info(f"✅ Распознано {len(items)} уникальных услуг с ценами")
+        return items
+
+    except Exception as e:
+        logger.error(f"❌ Критическая ошибка визуального ниндзи: {e}", exc_info=True)
+        return []
+
+
+if __name__ == '__main__':
+    # Быстрый тест при прямом запуске файла
+    import sys
+    import os
+    from dotenv import load_dotenv
+
+    load_dotenv()
+    API_KEY = os.getenv("GEMINI_API_KEY")
+    if not API_KEY:
+        print("❌ Укажи GEMINI_API_KEY в .env")
+        sys.exit(1)
+
+    genai.configure(api_key=API_KEY)
+    logging.basicConfig(level=logging.INFO)
+
+    items = get_booked_items_via_screenshot()
+    print("\n=== РАСПОЗНАННЫЕ УСЛУГИ С ЦЕНАМИ ===")
+    for i, item in enumerate(items, 1):
+        print(
+            f"{i:2}. {item['name'][:30]:<30} | Кол-во: {item['quantity']} | Цена: {item['price']} | Сумма: {item['sum']}")
+
+====================
+FILE: src\agent_logic.py
+====================
+
+import json
+import time
+import logging
+import re
+from typing import Dict, List, Any, Tuple
+import google.generativeai as genai
+from src.config import (
+    SERVICES_JSON,
+    CEMETERIES_JSON,
+    PRICES,
+    PERSONNEL_TARIFFS
+)
+
+logger = logging.getLogger(__name__)
+
+TEXT_MODEL = genai.GenerativeModel('gemini-3-flash-preview')
+
+# Константы имен услуг (чтобы не ошибиться в опечатках)
+SRV_TRANSPORT = "Перевезення покійного"
+SRV_EXTRA_SNOS = "снос (доп. точка)"
+SRV_EXTRA_CERE = "церемоніймейстер (доп. точка)"
+
+
+def clean_json_response(text: str) -> str:
+    """Извлекает JSON из текстового ответа нейронки."""
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if match:
+        return match.group()
+    return text.strip()
+
+
+def _process_personnel_logic(services: List[Dict], num_addresses: int) -> Tuple[List[Dict], List[str]]:
+    """Обработка логики грузчиков (снос) и их доп. точек."""
+    new_services = []
+    new_warnings = []
+    total_personnel_qty = 0
+    has_personnel = False
+
+    for s in services:
+        price = s.get("price", 0)
+        if price in PERSONNEL_TARIFFS:
+            name, qty = PERSONNEL_TARIFFS[price]
+            s["name"] = name
+            s["quantity"] = qty
+            s["price"] = PRICES["snos_base"] if "ескорт" not in name else PRICES["snos_escort_base"]
+            logger.debug(f"⚙️ Расшифрован персонал: {name} x{qty}")
+
+        if s["name"] in ["снос", "снос-ескорт", "Завантаження/розвантаження"]:
+            has_personnel = True
+            total_personnel_qty += s.get("quantity", 0)
+
+    if has_personnel and num_addresses >= 1:
+        extra_qty = total_personnel_qty * num_addresses
+        new_services.append({
+            "name": SRV_EXTRA_SNOS,
+            "price": PRICES["extra_point"],
+            "quantity": extra_qty
+        })
+        new_warnings.append(f"⚠️ Добавлено {extra_qty} доп. точек для персонала.")
+
+    return new_services, new_warnings
+
+
+def _process_transport_logic(services: List[Dict], num_addresses: int) -> Tuple[List[Dict], List[str]]:
+    """Обработка логики перевозки с защитой от изменения в меньшую сторону."""
+    new_services = []
+    new_warnings = []
+    transport_found = False
+
+    for s in services:
+        if s["name"] == SRV_TRANSPORT:
+            transport_found = True
+            # Защита: обновляем количество, только если оно отличается от нужного
+            if s["quantity"] != num_addresses and num_addresses > 0:
+                old_qty = s["quantity"]
+                s["quantity"] = num_addresses
+                new_warnings.append(f"⚠️ Перевозки скорректированы: {old_qty} -> {num_addresses}")
+
+    # Если перевозки вообще не было, но адреса есть
+    if not transport_found and num_addresses > 0:
+        new_services.append({
+            "name": SRV_TRANSPORT,
+            "price": PRICES["transport_base"],
+            "quantity": num_addresses
+        })
+        new_warnings.append(f"⚠️ Добавлена упущенная перевозка ({num_addresses} адр.).")
+
+    return new_services, new_warnings
+
+
+def _process_ceremony_logic(services: List[Dict], num_addresses: int) -> Tuple[List[Dict], List[str]]:
+    """Обработка доп. точек для церемониймейстера."""
+    new_services = []
+    new_warnings = []
+    ceremony_names = ["Церемоніймейстер", "Церемоніймейстер-РАНГ 2-й", "Церемоніймейстер-РАНГ 1-й"]
+
+    if any(s["name"] in ceremony_names for s in services) and num_addresses >= 1:
+        new_services.append({
+            "name": SRV_EXTRA_CERE,
+            "price": PRICES["extra_point"],
+            "quantity": num_addresses
+        })
+        new_warnings.append("⚠️ Добавлена доп. точка для церемониймейстера.")
+
+    return new_services, new_warnings
+
+
+def apply_business_rules_in_python(data: Dict[str, Any], num_addresses: int) -> Dict[str, Any]:
+    """Главный движок бизнес-логики."""
+    # Идиотоустойчивость: защита от отрицательных значений
+    num_addresses = max(0, num_addresses)
+
+    services = data.get("services", [])
+    warnings = data.get("warnings", [])
+
+    # Нормализация типов и защита от отрицательных цен/количества
+    for s in services:
+        s["price"] = max(0, int(s.get("price", 0)))
+        s["quantity"] = max(1, int(s.get("quantity", 1)))
+
+    # Прогоняем через конвейер логики с распаковкой кортежей
+    extra_personnel, pers_warn = _process_personnel_logic(services, num_addresses)
+    extra_transport, trans_warn = _process_transport_logic(services, num_addresses)
+    extra_ceremony, cere_warn = _process_ceremony_logic(services, num_addresses)
+
+    # Собираем всё воедино
+    services.extend(extra_personnel + extra_transport + extra_ceremony)
+    warnings.extend(pers_warn + trans_warn + cere_warn)
+
+    data["services"] = services
+    data["calculated_total"] = sum(s["price"] * s["quantity"] for s in services)
+    data["warnings"] = warnings
+
+    return data
+
+
+def validate_and_normalize(raw_json_str: str, num_addresses: int, booked_in_1c: List[str], retries: int = 3) -> Dict[
+    str, Any]:
+    """Второй агент: Очистка данных и применение справочников."""
+    logger.info(f"🧠 АГЕНТ 2: Нормализация данных. Адресов: {num_addresses}")
+
+    prompt = f"""
+    Ты — строгий Data Engineer. Твоя задача: нормализовать JSON и убрать дубликаты.
+    СЫРЫЕ ДАННЫЕ: {raw_json_str}
+    СПРАВОЧНИК: {SERVICES_JSON}
+    ЧЕРНЫЙ СПИСОК (Уже в 1С): {booked_in_1c}
+
+    ЗАДАЧИ:
+    1. ФИО -> Title Case. 
+    2. Кладбища -> только из списка {CEMETERIES_JSON}.
+    3. Если услуга в Черном списке — УДАЛИ ЕЁ.
+    4. Автобусы (18/30 мест): определи название по цене.
+
+    Верни ТОЛЬКО чистый JSON. Никаких объяснений.
+    """
+
+    for attempt in range(retries):
+        try:
+            response = TEXT_MODEL.generate_content(
+                prompt,
+                generation_config=genai.types.GenerationConfig(temperature=0.0)
+            )
+
+            clean_str = clean_json_response(response.text)
+            data = json.loads(clean_str)
+
+            final_data = apply_business_rules_in_python(data, num_addresses)
+            return final_data
+
+        except Exception as e:
+            logger.warning(f"⚠️ Попытка {attempt + 1} не удалась: {e}")
+            time.sleep(2)
+
+    return {}
+
+====================
+FILE: src\agent_vision.py
+====================
+
+import json
+import time
+import logging
+import re
+import os
+import mimetypes
+from pathlib import Path
+from typing import List, Optional
+import google.generativeai as genai
+from PIL import Image
+import io
+
+logger = logging.getLogger(__name__)
+
+# Стабильная модель для Vision задач
+VISION_MODEL = genai.GenerativeModel('gemini-3-flash-preview')
+
+MAX_IMAGE_SIZE = 20 * 1024 * 1024  # 20MB
+MAX_IMAGE_DIMENSION = 2048
+
+
+def clean_json_response(text: str) -> str:
+    """Извлекает JSON из текстового ответа."""
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    return match.group() if match else text.strip()
+
+
+def validate_image(image_path: str) -> Optional[str]:
+    """Проверяет изображение и возвращает ошибку или None."""
+    if not os.path.exists(image_path):
+        return f"Файл не найден: {image_path}"
+
+    size = os.path.getsize(image_path)
+    if size > MAX_IMAGE_SIZE:
+        return f"Файл слишком большой ({size / 1024 / 1024:.1f}MB): {image_path}"
+
+    return None
+
+
+def optimize_image(image_path: str) -> bytes:
+    """Оптимизирует изображение для отправки в API."""
+    with Image.open(image_path) as img:
+        # Уменьшаем если слишком большое
+        if max(img.size) > MAX_IMAGE_DIMENSION:
+            img.thumbnail((MAX_IMAGE_DIMENSION, MAX_IMAGE_DIMENSION), Image.Resampling.LANCZOS)
+
+        # Конвертируем в RGB если нужно (например, если это PNG с прозрачностью)
+        if img.mode in ('RGBA', 'P'):
+            img = img.convert('RGB')
+
+        # Сохраняем в память с оптимизацией
+        buffer = io.BytesIO()
+        img.save(buffer, format='JPEG', quality=85, optimize=True)
+        return buffer.getvalue()
+
+
+def get_mime_type(file_path: str) -> str:
+    """Определяет MIME-тип файла."""
+    mime_type, _ = mimetypes.guess_type(file_path)
+    if mime_type and mime_type.startswith('image/'):
+        return mime_type
+    return 'image/jpeg'
+
+
+def extract_raw_data(image_paths: List[str], retries: int = 3) -> str:
+    """Извлекает данные из изображений бланка заказа."""
+    logger.info("👀 АГЕНТ 1: Оцифровка бланка...")
+
+    # Валидация изображений
+    for path in image_paths:
+        error = validate_image(path)
+        if error:
+            logger.error(f"❌ {error}")
+            return "{}"
+
+    # Подготовка изображений
+    image_parts = []
+    for img_path in image_paths:
+        try:
+            optimized_data = optimize_image(img_path)
+            image_parts.append({
+                "mime_type": get_mime_type(img_path),
+                "data": optimized_data
+            })
+            logger.debug(f"✅ Подготовлено: {Path(img_path).name} ({len(optimized_data) / 1024:.1f} KB)")
+        except Exception as e:
+            logger.error(f"❌ Ошибка обработки {img_path}: {e}")
+            return "{}"
+
+    prompt = """
+    Твоя задача — извлечь структурированные данные из изображений бланка ритуального заказа.
+
+    ВАЖНЫЕ БЛОКИ:
+    1. ПОКОЙНЫЙ: ФИО, дата рождения (ОБЯЗАТЕЛЬНО, если есть), дата смерти, дата похорон, кладбище.
+    2. ЗАКАЗЧИК: ФИО, телефон.
+    3. ТРАНСПОРТ: все отмеченные пункты из блоков 'Транспортування' и 'Автотранспорт'.
+    4. УСЛУГИ: все пункты из 'Послуги для поховання' и 'Оренда'.
+    5. ТОВАРЫ: 'Труна', 'Хрест', 'Вінок', 'Атрибутика' с ценами.
+
+    ПРАВИЛА:
+    - Если дата рождения отсутствует или нечитаема — оставь пустой строкой.
+    - Если у услуги есть цена, но нет количества — считай количество = 1.
+    - Для транспорта указывай количество мест (например, "18 місць").
+    - ФОРМАТ ДАТ: всегда "ДД.ММ.ГГГГ" (например, "15.03.2024"). Если год указан двумя цифрами, преобразуй в четыре (99 -> 1999, 24 -> 2024).
+    - НЕ считай итоговые суммы. Только извлеки сырые данные.
+
+    Верни ТОЛЬКО JSON в формате:
+    {
+      "deceased": {"fio": "", "birth_date": "", "death_date": "", "burial_date": "", "cemetery": ""},
+      "customer": {"fio": "", "phone": ""},
+      "services": [{"name": "", "price": 0, "quantity": 1}]
+    }
+    """
+
+    content = [prompt] + image_parts
+
+    for attempt in range(retries):
+        try:
+            logger.info(f"📤 Попытка {attempt + 1}/{retries}...")
+
+            response = VISION_MODEL.generate_content(
+                content,
+                generation_config={"temperature": 0}
+            )
+
+            raw_text = clean_json_response(response.text)
+
+            if not raw_text or raw_text == "{}":
+                raise ValueError("Пустой или невалидный JSON от модели")
+
+            # Проверка структуры JSON
+            data = json.loads(raw_text)
+            if not isinstance(data, dict):
+                raise ValueError("Ответ не является словарем")
+
+            logger.info(f"✅ Данные извлечены успешно ({len(raw_text)} символов)")
+            return raw_text
+
+        except json.JSONDecodeError as e:
+            logger.warning(f"⚠️ Невалидный JSON: {e}")
+        except Exception as e:
+            logger.warning(f"⚠️ Ошибка: {type(e).__name__}: {e}")
+
+        if attempt < retries - 1:
+            delay = 2 ** attempt
+            logger.info(f"⏳ Повтор через {delay} сек...")
+            time.sleep(delay)
+
+    logger.error("❌ АГЕНТ 1 исчерпал все попытки.")
+    return "{}"
+
+====================
+FILE: src\ai_parser.py
+====================
+
+import logging
+from src.agent_vision import extract_raw_data
+from src.agent_logic import validate_and_normalize
+
+logger = logging.getLogger(__name__)
+
+
+# Добавили booked_in_1c
+def parse_images_with_gemini(image_paths: list, num_addresses: int, booked_in_1c: list) -> tuple[str, dict]:
+    logger.info("🔄 Запускаю конвейер Nier:Automato...")
+
+    raw_json_str = extract_raw_data(image_paths)
+    if not raw_json_str or raw_json_str == "{}":
+        logger.error("❌ AGENT 1 вернул пустые данные.")
+        return "", {}
+
+    # Передаем брони второму агенту
+    final_data = validate_and_normalize(raw_json_str, num_addresses, booked_in_1c)
+
+    if not final_data:
+        logger.error("❌ AGENT 2 не смог применить бизнес-логику.")
+        return raw_json_str, {}
+
+    logger.info("✅ Конвейер успешно завершен.")
+    return raw_json_str, final_data
+
+====================
+FILE: src\config.py
+====================
+
+# src/config.py
+import json
+
+# ПОЛНЫЙ СКЛАДСКОЙ СПИСОК (Все позиции из бегунка)
+SERVICES_LIST = [
+    # Блок 3: Инстанции
+    "Послуги СП КПО", "доки", "Послуги моргу",
+
+    # Блок 4: Подготовка и транспорт
+    "Транспортування", "Пакет/Плівка/Бокс", "Сейф-комплект", "Помити/одягти",
+    "Завантаження/розвантаження", "Укладання в труну", "Знесення по поверхах",
+    "Антибакт. обробка тіла", "Антибакт. обробка приміщення", "Вологе прибирання",
+    "Прибирання гнильних змін", "Доставка", "Збереження", "Розпакування контейнера",
+
+    # Блок 5: Автотранспорт
+    "Катафалк", "Доставка ритуального приладдя", "Перевезення покійного",
+    "Автотранспорт під вінки", "Автотранспорт під атрибут", "Лімузин",
+    "Доп 18 місць (Автотранспорт под людей)",
+    "Доп 18 місць (Підвищеної комфортності) (Автотранспорт под людей)",
+    "Доп 30 місць (Автотранспорт под людей)",
+    "Доп 30 місць (Підвищеної комфортності) (Автотранспорт под людей)",
+
+    # Блок 6: Проведение
+    "Церемоніймейстер", "Церемоніймейстер-РАНГ 2-й", "Церемоніймейстер-РАНГ 1-й",
+    "церемоніймейстер (доп. точка)", "церемоніймейстер (до 100км)",
+    "Поминальна панахида", "Послуги персоналу для поховання", "снос", "снос-ескорт",
+    "снос (доп. точка)", "снос (до 100км)", "Пронос труни", "Послуги священика",
+    "Послуги храму", "Послуги диякона", "Хор (півчі)", "Громадянська панахида",
+    "Викопування мог.", "Прибирання мог.", "Демонтаж", "Розбір", "Насипний пагорб",
+    "Встанов. хреста", "Декор могили", "Декор могили + прощалка", "Атласна дор.",
+    "Закопування/опускання труни", "Намет", "Альтанка", "Подіум", "Шатер",
+    "Духовий оркестр", "Ліфт",
+
+    # Блок 7-8: Товары и Атрибутика
+    "Труна", "Хрест", "Табличка на хрест", "Напис на хрест", "Вінок", "Стрічка",
+    "Портрет у рамці", "Портрет пластик", "Хусточки", "Свічки", "Панахида для священика",
+    "Колево", "Рит. набір", "Комплект рушників", "Рушник на хрест", "Рушник на портрет",
+    "Рушник на кришку труни", "Хрестик на труну", "Ікона", "Косинка", "Подушка",
+    "Покривало", "Капці", "Білий одяг", "Костюм", "Сукня", "Сарафан", "Табличка тимчасова",
+
+    # Блок 9: Аренда и прочее
+    "Свічники", "Підставки под труну", "Підставки під портрет", "Мольберт", "Столик",
+    "Стілець", "Ваза", "Стійки під вінки", "Комплект для вмивання рук", "Грунт для урни",
+
+    # Блок 11: Урна
+    "Доставка урни", "Підпоховання урни", "Урна", "Запайка"
+]
+
+# КЛАДБИЩА
+CEMETERIES_DICT = {
+    "Західне": "Западное", "Западное": "Западное",
+    "Крематор": "Крематорий", "Крематорий": "Крематорий",
+    "2-е христианское": "2-е христианское", "2-е Християнське": "2-е христианское",
+    "3-е еврейское": "3-е еврейское",
+    "Н.гор": "Новогородское", "Новогородское": "Новогородское", "н. гор": "Новогородское",
+    "Северное": "Северное", "Крыжановка": "Крыжановка", "Южное": "Южное",
+    "р.с": "Слободское", "Кривая балка": "Кривая балка", "Троицкое": "Троицкое",
+    "Латовка": "Латовка", "Усатово": "Усатово", "Черноморка": "Черноморка",
+    "Дм. Донского": "Дм. Донского", "Лески": "Лески", "Фонтанка": "Фонтанка",
+    "Корсунцы": "Корсунцы", "Красноселка": "Красноселка", "Ильичанка": "Ильичанка",
+    "Александровка": "Александровка", "Светлое": "Светлое", "Нерубайское": "Нерубайское",
+    "Великая балка": "Великая балка", "Холодная балка": "Холодная балка",
+    "Авангард": "Авангард", "Хлебодарское": "Хлебодарское", "Великий дальник": "Великий дальник",
+    "Дачное": "Дачное", "Лиманка": "Лиманка", "Сухой Лиман": "Сухой Лиман",
+    "Прилиманское": "Прилиманское", "Новая Долина": "Новая Долина",
+    "Бурлачья балка": "Бурлачья балка", "Малодолинское": "Малодолинское",
+    "Черноморск": "Черноморск", "Овидиополь": "Овидиополь", "Беляевка": "Беляевка",
+    "Санжейка": "Санжейка", "Грибовка": "Грибовка", "Маяки": "Маяки",
+    "Выгода": "Выгода", "Визирка": "Визирка", "Доброслав": "Доброслав"
+}
+# --- БИЗНЕС-ТАРИФЫ (УПРАВЛЕНИЕ ЦЕНАМИ) ---
+PRICES = {
+    "extra_point": 400,          # Цена за доп. точку
+    "transport_base": 1000,      # Базовая перевозка
+    "snos_base": 1300,           # Снос (1 человек)
+    "snos_escort_base": 2000     # Снос-эскорт (1 человек)
+}
+
+# Маппинг сумм от агентов в реальные услуги
+PERSONNEL_TARIFFS = {
+    5200: ("снос", 4),
+    7800: ("снос", 6),
+    10400: ("снос", 8),
+    8000: ("снос-ескорт", 4),
+    12000: ("снос-ескорт", 6),
+    16000: ("снос-ескорт", 8)
+}
+
+SERVICES_JSON = json.dumps(SERVICES_LIST, ensure_ascii=False)
+CEMETERIES_JSON = json.dumps(CEMETERIES_DICT, ensure_ascii=False)
+
+====================
+FILE: src\stealth_1c.py
+====================
+
+import time
+import logging
+import re
+import pyautogui
+import pyperclip
+import ctypes
+from typing import List, Optional
+
+logger = logging.getLogger(__name__)
+
+# --- Системные константы ---
+LANG_ENG = 0x0409
+LANG_RUS = 0x0419
+WM_INPUTLANGCHANGEREQUEST = 0x0050
+# Флаги: активировать и установить для всего процесса
+KLF_FLAGS = 0x00000001 | 0x00000004
+
+
+def set_layout(lang_id: int, retries: int = 3) -> bool:
+    """Устанавливает раскладку клавиатуры с проверкой через WinAPI."""
+    for attempt in range(retries):
+        try:
+            hwnd = ctypes.windll.user32.GetForegroundWindow()
+            if not hwnd:
+                time.sleep(0.1)
+                continue
+
+            # Загружаем нужную раскладку
+            layout = ctypes.windll.user32.LoadKeyboardLayoutW(f"{lang_id:08X}", KLF_FLAGS)
+
+            # Посылаем сигнал окну сменить раскладку
+            ctypes.windll.user32.SendMessageW(hwnd, WM_INPUTLANGCHANGEREQUEST, 0, layout)
+
+            time.sleep(0.15)  # Пауза на применение
+
+            # Проверяем, что реально стоит нужная раскладка (сравниваем младшее слово ID)
+            current_layout = ctypes.windll.user32.GetKeyboardLayout(0)
+            if (current_layout & 0xFFFF) == (lang_id & 0xFFFF):
+                return True
+        except Exception as e:
+            logger.debug(f"Попытка смены языка {attempt + 1} не удалась: {e}")
+            time.sleep(0.1)
+
+    return False
+
+
+def wait_for_window(title_part: str, timeout: int = 5) -> bool:
+    """Ожидает появления окна."""
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        hwnd = ctypes.windll.user32.GetForegroundWindow()
+        if hwnd:
+            length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
+            buff = ctypes.create_unicode_buffer(length + 1)
+            ctypes.windll.user32.GetWindowTextW(hwnd, buff, length + 1)
+            if title_part.lower() in buff.value.lower():
+                return True
+        time.sleep(0.3)
+    return False
+
+
+def safe_copy_to_clipboard(max_wait: float = 2.0) -> Optional[str]:
+    """Безопасное копирование данных из 1С."""
+    try:
+        old_content = pyperclip.paste()
+
+        # Выделяем всё и копируем
+        pyautogui.hotkey('ctrl', 'a')
+        time.sleep(0.2)
+        pyautogui.hotkey('ctrl', 'c')
+
+        # Цикл ожидания обновления буфера
+        start_time = time.time()
+        while time.time() - start_time < max_wait:
+            new_content = pyperclip.paste()
+            # Если в буфере что-то новое или хотя бы не пусто (если старый был пуст)
+            if new_content and new_content != old_content:
+                return new_content
+            time.sleep(0.1)
+
+        # Вторая попытка копирования, если первая не прошла
+        pyautogui.hotkey('ctrl', 'c')
+        time.sleep(0.3)
+        return pyperclip.paste()
+    except Exception as e:
+        logger.error(f"❌ Ошибка буфера: {e}")
+        return None
+
+
+def parse_1c_table(text: str) -> List[str]:
+    """Парсит текст из 1С, учитывая разные разделители и колонки."""
+    if not text or not text.strip(): return []
+
+    lines = [line.strip() for line in text.strip().split('\n') if line.strip()]
+    if len(lines) < 2: return []
+
+    # Определяем разделитель
+    first_line = lines[0]
+    if '\t' in first_line:
+        header = first_line.split('\t')
+        separator = '\t'
+    else:
+        # Если 1С выдала пробелы вместо табов
+        header = re.split(r'\s{2,}', first_line)
+        separator = r'\s{2,}'
+
+    # Ищем индекс колонки (расширенный поиск)
+    name_idx = -1
+    target_cols = ["номенклатура", "наименование", "товар", "послуга", "услуга", "изделие"]
+
+    for i, col in enumerate(header):
+        col_clean = col.strip().lower()
+        if any(target in col_clean for target in target_cols):
+            name_idx = i
+            break
+
+    if name_idx == -1:
+        logger.error(f"❌ Колонку не нашли. Заголовки: {header[:4]}")
+        return []
+
+    items = []
+    for line in lines[1:]:
+        cols = line.split('\t') if separator == '\t' else re.split(separator, line)
+        if len(cols) > name_idx:
+            val = cols[name_idx].strip().strip('"').strip("'")
+            # Нормализуем пробелы и проверяем длину
+            val = ' '.join(val.split())
+            if len(val) > 2:
+                items.append(val)
+
+    # Уникальные значения с сохранением порядка
+    return list(dict.fromkeys(items))
+
+
+def get_booked_items_from_1c(timeout: int = 10) -> List[str]:
+    """Главная функция для 1С стелс-интеграции."""
+    logger.info("🔍 Ниндзя готовится к прыжку в 1С...")
+
+    if not wait_for_window("Вывести список", timeout):
+        logger.warning("⚠️ Окно 1С не найдено. Нажми Enter в консоли, когда подготовишь окно...")
+        input("Нажми Enter для продолжения...")
+
+    try:
+        # Устанавливаем ENG раскладку для команд
+        if not set_layout(LANG_ENG):
+            logger.error("❌ Не удалось переключить раскладку! Ctrl+C может не сработать.")
+            # Продолжаем на удачу
+
+        time.sleep(0.3)
+        raw_text = safe_copy_to_clipboard()
+
+        # Закрываем временное окно 1С (Alt+F4 или Ctrl+F4)
+        pyautogui.hotkey('ctrl', 'f4')
+
+        if not raw_text:
+            logger.error("❌ Данные из 1С не получены.")
+            return []
+
+        result = parse_1c_table(raw_text)
+        logger.info(f"✅ Из 1С успешно вытянуто уникальных позиций: {len(result)}")
+        return result
+
+    except Exception as e:
+        logger.error(f"❌ Фатальный сбой стелс-модуля: {e}")
+        return []
+    finally:
+        # Железно возвращаем раскладку на базу
+        set_layout(LANG_RUS)
+
+====================
+FILE: src\validator.py
+====================
+
+import logging
+from datetime import datetime
+from pydantic import BaseModel, Field, field_validator, ValidationError
+
+logger = logging.getLogger(__name__)
+
+
+# --- PYDANTIC СХЕМЫ ---
+class Deceased(BaseModel):
+    fio: str = Field(default="НЕ УКАЗАНО")
+    birth_date: str = Field(default="01.01.1920")
+    death_date: str = Field(default="")
+    burial_date: str = Field(default="")
+    cemetery: str = Field(default="")
+
+
+class Customer(BaseModel):
+    fio: str = Field(default="")
+    phone: str = Field(default="")
+
+
+class Service(BaseModel):
+    name: str
+    price: int
+    quantity: int = Field(default=1)
+
+    @field_validator('price', 'quantity')
+    def must_be_positive(cls, v):
+        if v < 0:
+            raise ValueError('Значение не может быть отрицательным')
+        return v
+
+
+class OrderData(BaseModel):
+    deceased: Deceased
+    customer: Customer
+    services: list[Service]
+    warnings: list[str] = []
+    calculated_total: int = 0
+
+
+# --- БИЗНЕС-ЛОГИКА ВАЛИДАЦИИ ---
+def validate_and_fix_order(order_data: dict) -> dict:
+    logger.info("🛡️ Запуск Pydantic-валидации и контроля математики...")
+
+    # 1. Жесткая валидация структуры (Pydantic)
+    try:
+        validated_order = OrderData(**order_data)
+        clean_data = validated_order.model_dump()  # Превращаем обратно в чистый dict
+    except ValidationError as e:
+        logger.error(f"❌ КРИТИЧЕСКАЯ ОШИБКА СТРУКТУРЫ JSON! LLM сошла с ума:\n{e}")
+        return {}  # Возвращаем пустоту, чтобы не положить систему дальше
+
+    # 2. Фикс даты смерти
+    if not clean_data["deceased"]["death_date"]:
+        today_str = datetime.now().strftime("%d.%m.%Y")
+        clean_data["deceased"]["death_date"] = today_str
+        logger.warning(f"⚠️ Дата смерти пустая! Подставил сегодняшнюю: {today_str}")
+
+    # 3. Математический контроль
+    real_total = sum(svc["price"] * svc["quantity"] for svc in clean_data["services"])
+    agent_total = clean_data.get("calculated_total", 0)
+
+    if real_total != agent_total:
+        logger.warning(f"⚠️ ВНИМАНИЕ! Математика пересчитана. Было: {agent_total}, Стало: {real_total}")
+        clean_data["calculated_total"] = real_total
+    else:
+        logger.info(f"✅ Математика сошлась: {real_total} грн.")
+
+    return clean_data
+
+====================
+FILE: src\win_1c_bot.py
+====================
+
+import pyautogui
+import logging
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+# Вычисляем путь к папке data/templates
+BASE_DIR = Path(__file__).resolve().parent.parent
+TEMPLATES_DIR = BASE_DIR / "data" / "templates"
+
+
+def click_tab_by_image(image_filename: str, confidence: float = 0.8) -> bool:
+    """
+    Ищет вкладку на экране по картинке и кликает по ней.
+    """
+    image_path = str(TEMPLATES_DIR / image_filename)
+
+    try:
+        # Ищем центр картинки на экране (нужен pip install opencv-python)
+        location = pyautogui.locateCenterOnScreen(image_path, confidence=confidence)
+
+        if location:
+            pyautogui.click(location)
+            logger.info(f"✅ Успешно кликнул по вкладке: {image_filename}")
+            time.sleep(0.3)  # Даем 1С время перерисовать интерфейс
+            return True
+        else:
+            logger.warning(f"⚠️ Не смог найти вкладку на экране: {image_filename}")
+            return False
+
+    except pyautogui.ImageNotFoundException:
+        logger.warning(f"⚠️ Картинка {image_filename} вообще не найдена на экране.")
+        return False
+    except Exception as e:
+        logger.error(f"❌ Ошибка компьютерного зрения: {e}")
+        return False
+
+# Как это потом использовать в основном алгоритме:
+# click_tab_by_image('tab_uslugi.png')
+# click_tab_by_image('tab_sklad.png')
+
+====================
+FILE: src\__init__.py
+====================
+
