@@ -31,3 +31,5 @@ data/processed/
 *.sqlite3
 *.db
 
+# Testing
+.hypothesis/

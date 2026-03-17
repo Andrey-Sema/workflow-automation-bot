@@ -1,0 +1,1894 @@
+Структура проекта:
+./
+    .gitignore
+    get_mouse.py
+    main.py
+    README.md
+    requirements.txt
+    run.bat
+    test_1c_hello.py
+    .idea/
+        .gitignore
+        inspectionProfiles/
+    .pytest_cache/
+        .gitignore
+        README.md
+        v/
+            cache/
+    src/
+        agent_booked_ocr.py
+        agent_logic.py
+        agent_vision.py
+        ai_parser.py
+        config.py
+        stealth_1c.py
+        utils.py
+        validator.py
+        win_1c_bot.py
+        __init__.py
+    tests/
+        test_utils.py
+        __init__.py
+        .pytest_cache/
+            .gitignore
+            README.md
+            v/
+                cache/
+
+==================================================
+СОДЕРЖИМОЕ ФАЙЛОВ
+==================================================
+
+
+====================
+FILE: .gitignore
+====================
+
+# === Окружение ===
+.venv/
+ENV/
+env/
+
+# === Секреты (САМОЕ ВАЖНОЕ) ===
+.env
+
+# === Мусор PyCharm и системы ===
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# === Кэш Python ===
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# === Дебаг, логи и скриншоты ===
+*.log
+debug_screenshots/
+
+# === Данные и базы ===
+*.csv
+data/input/
+data/output/
+data/processed/
+*.sqlite3
+*.db
+
+# Testing
+.hypothesis/
+
+
+====================
+FILE: get_mouse.py
+====================
+
+import pyautogui
+import time
+
+print("У тебя 5 секунд! Наведи мышку точно в центр вкладки 'Склад' в 1С и не двигай...")
+time.sleep(5)
+x, y = pyautogui.position()
+print(f"Координаты вкладки 'Склад': X={x}, Y={y}")
+
+print("\nТеперь у тебя 5 секунд! Наведи мышку в центр вкладки 'Услуги'...")
+time.sleep(5)
+x, y = pyautogui.position()
+print(f"Координаты вкладки 'Услуги': X={x}, Y={y}")
+
+====================
+FILE: main.py
+====================
+
+import os
+import json
+import logging
+import shutil
+import time
+from pathlib import Path
+from dotenv import load_dotenv
+import google.generativeai as genai
+
+# --- ИМПОРТЫ НАШИХ МОДУЛЕЙ ---
+from src.agent_booked_ocr import get_booked_items_via_screenshot
+from src.ai_parser import parse_images_with_gemini
+from src.validator import validate_and_fix_order
+
+# Настройка логирования
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', datefmt='%H:%M:%S')
+logger = logging.getLogger(__name__)
+
+# Загрузка окружения
+load_dotenv()
+API_KEY = os.getenv("GEMINI_API_KEY")
+if not API_KEY:
+    raise RuntimeError("❌ GEMINI_API_KEY не найден в .env!")
+
+# Настройка путей
+BASE_DIR = Path(__file__).resolve().parent
+INPUT_DIR = BASE_DIR / "data" / "input"
+PROCESSED_DIR = BASE_DIR / "data" / "processed"
+OUTPUT_DIR = BASE_DIR / "data" / "output"
+
+# Создаем папки, если их нет
+for d in [INPUT_DIR, PROCESSED_DIR, OUTPUT_DIR]:
+    d.mkdir(parents=True, exist_ok=True)
+
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
+
+
+def get_photos_for_order(num_photos: int) -> list[Path]:
+    """Собирает нужное количество фоток из папки input, начиная с самых старых."""
+    all_files = [f for f in INPUT_DIR.iterdir() if f.is_file() and f.suffix.lower() in IMAGE_EXTENSIONS]
+    if not all_files:
+        logger.warning("⚠️ Папка input пуста! Закинь фотки наряда.")
+        return []
+
+    all_files.sort(key=lambda x: x.stat().st_mtime)
+
+    if len(all_files) < num_photos:
+        logger.warning(f"⚠️ Нужно {num_photos} фоток, а в папке только {len(all_files)}!")
+        return []
+
+    return all_files[:num_photos]
+
+
+def run_cli():
+    logger.info("=" * 50)
+    logger.info("🤖 Nier:Automato v2.0 | Enterprise Edition")
+    logger.info("=" * 50)
+
+    genai.configure(api_key=API_KEY)
+
+    while True:
+        start_cmd = input("\n👉 Введи '1' для старта (или 'q' для выхода): ").strip()
+        if start_cmd.lower() == 'q':
+            break
+        if start_cmd != '1':
+            continue
+
+        # Запрос количества фото
+        while True:
+            try:
+                num_photos = int(input("📸 Сколько фото в этом наряде?: "))
+                if 1 <= num_photos <= 10:
+                    break
+                print("⚠️ Введи от 1 до 10!")
+            except ValueError:
+                print("⚠️ Бля, введи цифру!")
+
+        # Запрос количества адресов (доп. точек)
+        while True:
+            try:
+                num_addresses = int(input("📍 Сколько адресов (доп. точек) в маршруте? (обычно 0-3): "))
+                if 0 <= num_addresses <= 10:
+                    break
+                print("⚠️ Введи реальное число адресов!")
+            except ValueError:
+                print("⚠️ Нужна цифра!")
+
+        # --- СТЕЛС-МОДУЛЬ 1С ---
+        scan_1c = input("🕵️‍♂️ Сканируем открытый наряд в 1С на дубликаты? (y/n): ").strip().lower()
+        booked_in_1c = []
+        if scan_1c == 'y':
+            input("👉 Нажми Enter и переместись в экран наряда 1С для прчотения услуг")
+            booked_in_1c = get_booked_items_via_screenshot()
+
+        photos_to_process = get_photos_for_order(num_photos)
+        if not photos_to_process:
+            continue
+
+        logger.info(
+            f"🚀 В работе {len(photos_to_process)} файла(ов). Адресов: {num_addresses}. Броней в 1С: {len(booked_in_1c)}")
+
+        # --- ТАЙМИНГ ПО БЛОКАМ ---
+        start_time = time.time()
+
+        # 1. Парсинг и Бизнес-логика (Vision + Text LLM + Python Engine)
+        raw_json_str, final_json_data = parse_images_with_gemini(photos_to_process, num_addresses, booked_in_1c)
+
+        end_time = time.time()
+        # -------------------------
+
+        if final_json_data:
+            elapsed = round(end_time - start_time, 2)
+            logger.info(f"⏱ Нейросети отработали за: {elapsed} сек.")
+
+            # 2. 🔥 ТАМОЖНЯ PYDANTIC (Проверка структуры и математики)
+            final_json_data = validate_and_fix_order(final_json_data)
+
+            if not final_json_data:
+                logger.error("❌ Данные не прошли Pydantic-валидацию. Разбирайся с логами.")
+                continue
+
+            # --- ВЫВОД АЛЕРТОВ ---
+            dob = final_json_data.get("deceased", {}).get("birth_date", "")
+            if dob == "01.01.1920":
+                logger.warning(
+                    "🚨 СЕНТИЛЬНЫЙ ВАРНИНГ: Дата рождения не указана на бланке. Уточни у агента для таблички!")
+
+            warnings_list = final_json_data.get("warnings", [])
+            for w in warnings_list:
+                logger.warning(f"🤬 АЛЕРТ ПО ДЕНЬГАМ/ПРАВИЛАМ: {w}")
+
+            has_errors = any("ОШИБКА ВАЛИДАЦИИ" in str(s.get("name", "")) for s in final_json_data.get("services", []))
+            if has_errors:
+                logger.error("🚨 В услугах есть косяки распознавания! Чекай лог.")
+
+            # --- СОХРАНЕНИЕ ЧЕРНОГО ЯЩИКА ---
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            log_filename = f"order_log_{timestamp}.txt"
+
+            with open(OUTPUT_DIR / log_filename, "w", encoding="utf-8") as f:
+                f.write("=== ШАГ 1: СЫРОЙ JSON (От Vision) ===\n" + raw_json_str + "\n\n")
+                f.write("=== ШАГ 2: ФИНАЛЬНЫЙ JSON (После Pydantic и Python Engine) ===\n")
+                f.write(json.dumps(final_json_data, indent=4, ensure_ascii=False))
+
+            logger.info(f"💾 Лог сохранен: {log_filename}")
+
+            # --- ПЕРЕМЕЩЕНИЕ ФОТОК ---
+            for p in photos_to_process:
+                for attempt in range(3):
+                    try:
+                        shutil.move(str(p), str(PROCESSED_DIR / p.name))
+                        break
+                    except Exception as e:
+                        time.sleep(1)  # Костыль под локи Windows
+                        if attempt == 2:
+                            logger.error(f"❌ Ошибка перемещения {p.name}: {e}")
+
+            logger.info(f"✅ Наряд успешно отработан и готов к вводу.")
+        else:
+            logger.error("❌ Фатальная ошибка парсинга конвейера.")
+
+
+if __name__ == "__main__":
+    run_cli()
+
+====================
+FILE: README.md
+====================
+
+Nier:Automato 🤖
+Enterprise-grade automation system for ritual service centers.
+
+Система автоматизации обработки заказов, объединяющая ИИ-зрение (OCR), бизнес-логику и стелс-интеграцию с 1С через эмуляцию действий пользователя.
+
+🚀 Основные возможности
+Мультимодальный OCR: Распознавание рукописных бланков любой сложности с использованием gemini-3-flash-preview.
+
+ИИ-Агенты: * Агент 1 (Vision): Оцифровка физических документов.
+
+Агент 2 (Logic): Автоматическое применение бизнес-правил (расчет доп. точек, тарификация персонала).
+
+Агент 3 (Sync): Визуальный захват данных из интерфейса 1С для предотвращения дублей.
+
+Стелс-режим: Интеграция с 1С через системные буферы и WinAPI без прямого доступа к БД.
+
+Бронированная валидация: Использование Pydantic и Hypothesis для обеспечения 100% целостности данных перед записью.
+
+🛠 Технологический стек
+Язык: Python 3.13
+
+AI: Google Gemini API (gemini-3.1-flash-lite-preview(Работа с текстом), gemini-3-flash-preview(Работа с фотографиями бланков))
+
+Automation: PyAutoGUI, Pyperclip, ctypes (WinAPI)
+
+Validation: Pydantic v2, Hypothesis
+
+Testing: Pytest
+
+====================
+FILE: requirements.txt
+====================
+
+Ошибка чтения файла: 'utf-8' codec can't decode byte 0xff in position 0: invalid start byte
+
+====================
+FILE: run.bat
+====================
+
+@echo off
+set PYTHONUTF8=1
+chcp 65001 >nul
+setlocal enabledelayedexpansion
+
+echo ==========================================
+echo 🚀 Инициализация Nier:Automato...
+echo ==========================================
+
+:: 1. Проверка на дурака: не запущен ли уже бот?
+tasklist /FI "IMAGENAME eq python.exe" 2>NUL | find /I "main.py" >NUL
+IF "!ERRORLEVEL!"=="0" (
+    echo ⚠️ БЛЯТЬ! Бот уже запущен! Заверши предыдущий процесс.
+    pause
+    exit /b 1
+)
+
+:: 2. Проверка наличия Python
+python --version >NUL 2>&1
+IF %ERRORLEVEL% NEQ 0 (
+    echo ❌ Python не установлен или не добавлен в PATH! Пиздуй устанавливать.
+    pause
+    exit /b 1
+)
+
+:: 3. Создаем структуру папок (чтобы код не падал при первом запуске на новом компе)
+IF NOT EXIST "data\input" mkdir "data\input"
+IF NOT EXIST "data\output" mkdir "data\output"
+IF NOT EXIST "data\processed" mkdir "data\processed"
+IF NOT EXIST "data\templates" mkdir "data\templates"
+
+:: 4. Проверка ключей (.env)
+IF NOT EXIST ".env" (
+    echo ⚠️ Ебать-копать, файла .env нет! Создаю шаблон...
+    echo GEMINI_API_KEY=твой_ключ_сюда > .env
+    echo ⚠️ Я создал файл .env. Открой его, вставь свой API ключ от Gemini и запусти снова!
+    pause
+    exit /b 1
+)
+
+:: 5. Поднятие окружения
+IF NOT EXIST ".venv" (
+    echo ⚠️ Окружение не найдено. Создаю с нуля, подожди...
+    python -m venv .venv
+    IF %ERRORLEVEL% NEQ 0 (
+        echo ❌ Ошибка создания виртуального окружения!
+        pause
+        exit /b 1
+    )
+    echo ✅ Папка .venv создана.
+
+    echo 📦 Ставлю зависимости из requirements.txt...
+    ".\.venv\Scripts\python.exe" -m pip install --upgrade pip >NUL
+    ".\.venv\Scripts\python.exe" -m pip install -r requirements.txt
+    IF %ERRORLEVEL% NEQ 0 (
+        echo ❌ Пиздец, ошибка установки зависимостей! Проверь инет или файл requirements.txt.
+        pause
+        exit /b 1
+    )
+    echo ✅ Все нужные либы установлены!
+) ELSE (
+    echo ✅ Виртуальное окружение на месте.
+)
+echo ==========================================
+echo 🤖 ЗАПУСК СИСТЕМЫ...
+echo ==========================================
+
+:: Запускаем через вызов модуля, так надежнее
+".\.venv\Scripts\python.exe" main.py
+
+:: Сохраняем код ошибки, используя кавычки для безопасности
+set "EXIT_CODE=%ERRORLEVEL%"
+
+if %EXIT_CODE% NEQ 0 (
+    echo.
+    echo ❌ Бот завершился с ошибкой (код: %EXIT_CODE%)
+) else (
+    echo.
+    echo ✅ Бот успешно завершил работу
+)
+
+pause
+exit /b %EXIT_CODE%
+
+====================
+FILE: test_1c_hello.py
+====================
+
+import keyboard
+import time
+
+
+def test_1c_injection():
+    print("⚠️ ПОДГОТОВКА: Открой 1С.")
+    print(
+        "У тебя 5 секунд! Кликни мышкой в любую ячейку (например, в 'Номенклатуру' или 'Сумму'), чтобы там замигал курсор.")
+
+    for i in range(3, 0, -1):
+        print(f"Старт через {i}...")
+        time.sleep(1)
+
+    print("👻 Поехали! Печатаю 'Привет' и жму Enter...")
+
+    # Печатаем слово с задержкой 0.05 сек между буквами
+    keyboard.write("Доставка", delay=0.02)
+    time.sleep(0.2)
+    keyboard.send('enter')
+
+    print("✅ Тест завершен. Проверяй 1С!")
+
+
+if __name__ == "__main__":
+    test_1c_injection()
+
+====================
+FILE: .idea\.gitignore
+====================
+
+# Default ignored files
+/shelf/
+/workspace.xml
+# Editor-based HTTP Client requests
+/httpRequests/
+
+
+====================
+FILE: .pytest_cache\.gitignore
+====================
+
+# Created by pytest automatically.
+*
+
+
+====================
+FILE: .pytest_cache\README.md
+====================
+
+# pytest cache directory #
+
+This directory contains data from the pytest's cache plugin,
+which provides the `--lf` and `--ff` options, as well as the `cache` fixture.
+
+**Do not** commit this to version control.
+
+See [the docs](https://docs.pytest.org/en/stable/how-to/cache.html) for more information.
+
+
+====================
+FILE: src\agent_booked_ocr.py
+====================
+
+import pyautogui
+import io
+import logging
+import time
+from typing import List, Dict, Any
+from pathlib import Path
+from datetime import datetime
+import google.generativeai as genai
+
+from src.config import BOOKED_MODEL_NAME
+from src.utils import safe_int, clean_service_name, safe_parse_json
+
+logger = logging.getLogger(__name__)
+BOOKED_MODEL = genai.GenerativeModel(BOOKED_MODEL_NAME)
+DEBUG_DIR = Path("debug_screenshots")
+
+
+def validate_items(items: List[Dict]) -> List[Dict]:
+    valid = []
+    seen_names = set()
+    for item in items:
+        if not isinstance(item, dict): continue
+        name = clean_service_name(item.get("name", ""))
+        if len(name) < 3 or not any(c.isalpha() for c in name) or name in seen_names: continue
+
+        qty = safe_int(item.get("quantity", 1), default=1)
+        price = safe_int(item.get("price", 0), default=0)
+        total = safe_int(item.get("sum", 0), default=0)
+
+        if qty > 0 and price > 0:
+            expected_sum = qty * price
+            if expected_sum != total and total > 0:
+                total = expected_sum
+
+        valid.append({
+            "name": name,
+            "quantity": max(1, qty),
+            "price": max(0, price),
+            "sum": max(0, total)
+        })
+        seen_names.add(name)
+    return valid
+
+
+def get_booked_items_via_screenshot() -> List[Dict[str, Any]]:
+    logger.info("👁️ Агент №3 (Визуальный Ниндзя) активирован...")
+    print("\n" + "=" * 70)
+    print("⚠️ ВИЗУАЛЬНОЕ СКАНИРОВАНИЕ 1С ⚠️")
+    print("1. Нажми Enter в этой консоли.")
+    print("2. Быстро разверни окно удаленки с 1С на весь экран.")
+    print("3. Убедись, что таблицу с бронями ХОРОШО ВИДНО.")
+    print("=" * 70)
+    input("👉 Нажми Enter и выведи табличку 1С на экран... ")
+
+    for i in range(3, 0, -1):
+        logger.info(f"⏳ {i}...")
+        time.sleep(1)
+    logger.info("📸 ФОТОГРАФИРУЮ ЭКРАН!")
+
+    try:
+        full_screen_img = pyautogui.screenshot()
+        DEBUG_DIR.mkdir(exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        # Сохраняем для логов с нормальным сжатием
+        full_screen_img.save(DEBUG_DIR / f"screenshot_{timestamp}.jpg", format='JPEG', quality=85)
+
+        # Оптимизируем отправку: 85% хватает с головой для OCR экрана
+        img_byte_arr = io.BytesIO()
+        full_screen_img.save(img_byte_arr, format='JPEG', quality=85, optimize=True)
+        optimized_bytes = img_byte_arr.getvalue()
+
+        logger.info(f"📤 Отправляю {len(optimized_bytes) / 1024:.1f} KB в Gemini...")
+
+        prompt = """
+        Ты — AI-сканер интерфейса 1С. На скриншоте открыта таблица "Услуги".
+        Найди таблицу и извлеки данные строго из колонок: "Номенклатура", "Количество", "Цена", "Сумма".
+        Верни СТРОГО JSON-массив [...]. Никакого текста до или после.
+        """
+        response = BOOKED_MODEL.generate_content([prompt, {"mime_type": "image/jpeg", "data": optimized_bytes}])
+
+        # Парсим с expected_type='array'
+        raw_items = safe_parse_json(response.text, expected_type='array')
+
+        if not raw_items or not isinstance(raw_items, list):
+            logger.warning("⚠️ ИИ не нашел услуг на скрине или вернул кривой ответ.")
+            return []
+
+        items = validate_items(raw_items)
+        logger.info(f"✅ Распознано {len(items)} услуг из 1С")
+        return items
+
+    except Exception as e:
+        logger.error(f"❌ Ошибка визуального агента: {e}", exc_info=True)
+        return []
+
+====================
+FILE: src\agent_logic.py
+====================
+
+import json
+import time
+import logging
+from typing import Dict, List, Any, Tuple
+import google.generativeai as genai
+
+from src.config import SERVICES_JSON, CEMETERIES_JSON, PRICES, PERSONNEL_TARIFFS, TEXT_MODEL_NAME
+from src.utils import safe_parse_json
+
+logger = logging.getLogger(__name__)
+TEXT_MODEL = genai.GenerativeModel(TEXT_MODEL_NAME)
+
+SRV_TRANSPORT = "Перевезення покійного"
+SRV_EXTRA_SNOS = "снос (доп. точка)"
+SRV_EXTRA_CERE = "церемоніймейстер (доп. точка)"
+
+
+def _process_personnel_logic(services: List[Dict], num_addresses: int) -> Tuple[List[Dict], List[str]]:
+    new_services, new_warnings = [], []
+    total_personnel_qty = 0
+    has_personnel = False
+
+    for s in services:
+        price = s.get("price", 0)
+        if price in PERSONNEL_TARIFFS:
+            name, qty = PERSONNEL_TARIFFS[price]
+            s["name"] = name
+            s["quantity"] = qty
+            s["price"] = PRICES["snos_base"] if "ескорт" not in name else PRICES["snos_escort_base"]
+            logger.debug(f"⚙️ Расшифрован персонал: {name} x{qty}")
+
+        if s["name"] in ["снос", "снос-ескорт", "Завантаження/розвантаження"]:
+            has_personnel = True
+            total_personnel_qty += s.get("quantity", 0)
+
+    if has_personnel and num_addresses >= 1:
+        extra_qty = total_personnel_qty * num_addresses
+        new_services.append({"name": SRV_EXTRA_SNOS, "price": PRICES["extra_point"], "quantity": extra_qty})
+        new_warnings.append(f"⚠️ Добавлено {extra_qty} доп. точек для персонала.")
+
+    return new_services, new_warnings
+
+
+def _process_transport_logic(services: List[Dict], num_addresses: int) -> Tuple[List[Dict], List[str]]:
+    new_services, new_warnings = [], []
+    transport_found = False
+
+    for s in services:
+        if s["name"] == SRV_TRANSPORT:
+            transport_found = True
+            if s["quantity"] != num_addresses and num_addresses > 0:
+                old_qty = s["quantity"]
+                s["quantity"] = num_addresses
+                new_warnings.append(f"⚠️ Перевозки скорректированы: {old_qty} -> {num_addresses}")
+
+    if not transport_found and num_addresses > 0:
+        new_services.append({"name": SRV_TRANSPORT, "price": PRICES["transport_base"], "quantity": num_addresses})
+        new_warnings.append(f"⚠️ Добавлена упущенная перевозка ({num_addresses} адр.).")
+
+    return new_services, new_warnings
+
+
+def _process_ceremony_logic(services: List[Dict], num_addresses: int) -> Tuple[List[Dict], List[str]]:
+    new_services, new_warnings = [], []
+    ceremony_names = ["Церемоніймейстер", "Церемоніймейстер-РАНГ 2-й", "Церемоніймейстер-РАНГ 1-й"]
+
+    if any(s["name"] in ceremony_names for s in services) and num_addresses >= 1:
+        new_services.append({"name": SRV_EXTRA_CERE, "price": PRICES["extra_point"], "quantity": num_addresses})
+        new_warnings.append("⚠️ Добавлена доп. точка для церемониймейстера.")
+
+    return new_services, new_warnings
+
+
+def apply_business_rules_in_python(data: Dict[str, Any], num_addresses: int) -> Dict[str, Any]:
+    num_addresses = max(0, num_addresses)
+    services = data.get("services", [])
+    warnings = data.get("warnings", [])
+
+    for s in services:
+        s["price"] = max(0, int(s.get("price", 0)))
+        s["quantity"] = max(1, int(s.get("quantity", 1)))
+
+    extra_personnel, pers_warn = _process_personnel_logic(services, num_addresses)
+    extra_transport, trans_warn = _process_transport_logic(services, num_addresses)
+    extra_ceremony, cere_warn = _process_ceremony_logic(services, num_addresses)
+
+    services.extend(extra_personnel + extra_transport + extra_ceremony)
+    warnings.extend(pers_warn + trans_warn + cere_warn)
+
+    data["services"] = services
+    data["calculated_total"] = sum(s["price"] * s["quantity"] for s in services)
+    data["warnings"] = warnings
+    return data
+
+
+def validate_and_normalize(raw_json_str: str, num_addresses: int, booked_in_1c: List[str], retries: int = 3) -> Dict[
+    str, Any]:
+    logger.info(f"🧠 АГЕНТ 2: Нормализация данных. Адресов: {num_addresses}")
+
+    prompt = f"""
+    Ты — строгий Data Engineer. Твоя задача: нормализовать JSON и убрать дубликаты.
+    СЫРЫЕ ДАННЫЕ: {raw_json_str}
+    СПРАВОЧНИК: {SERVICES_JSON}
+    ЧЕРНЫЙ СПИСОК (Уже в 1С): {booked_in_1c}
+
+    ЗАДАЧИ:
+    1. ФИО -> Title Case. 
+    2. Кладбища -> только из списка {CEMETERIES_JSON}.
+    3. Если услуга в Черном списке — УДАЛИ ЕЁ.
+    4. Автобусы (18/30 мест): определи название по цене.
+
+    Верни ТОЛЬКО чистый JSON (объект).
+    """
+
+    for attempt in range(retries):
+        try:
+            response = TEXT_MODEL.generate_content(prompt, generation_config={"temperature": 0.0})
+            data = safe_parse_json(response.text, expected_type='object')
+
+            if data:
+                return apply_business_rules_in_python(data, num_addresses)
+
+        except Exception as e:
+            logger.warning(f"⚠️ Попытка {attempt + 1} не удалась: {e}")
+            time.sleep(2)
+
+    return {}
+
+====================
+FILE: src\agent_vision.py
+====================
+
+import time
+import logging
+import os
+import mimetypes
+from pathlib import Path
+from typing import List, Optional, Dict, Any
+import google.generativeai as genai
+from PIL import Image, ImageOps
+import io
+
+from src.utils import clean_json_response, safe_parse_json, deduplicate_services
+from src.config import VISION_MODEL_NAME
+
+try:
+    import fitz
+except ImportError:
+    fitz = None
+
+logger = logging.getLogger(__name__)
+VISION_MODEL = genai.GenerativeModel(VISION_MODEL_NAME)
+
+MAX_IMAGE_SIZE = 20 * 1024 * 1024
+TARGET_MAX_SIZE_KB = 10 * 1024
+
+
+def fix_image_orientation(img: Image.Image) -> Image.Image:
+    try:
+        return ImageOps.exif_transpose(img)
+    except:
+        return img
+
+
+def optimize_image_bytes(img: Image.Image, filename: str = "image", max_size_kb: int = TARGET_MAX_SIZE_KB) -> bytes:
+    if img.mode in ('RGBA', 'P'):
+        img = img.convert('RGB')
+    buffer = io.BytesIO()
+    quality = 95
+    while quality > 70:
+        buffer.seek(0)
+        buffer.truncate(0)
+        img.save(buffer, format='JPEG', quality=quality, optimize=True)
+        if buffer.tell() / 1024 <= max_size_kb:
+            break
+        quality -= 5
+    logger.debug(f"🎨 Оптимизация {filename}: → {buffer.tell() / 1024:.1f} KB, quality={quality}")
+    return buffer.getvalue()
+
+
+def optimize_image(image_path: str, max_size_kb: int = TARGET_MAX_SIZE_KB) -> bytes:
+    with Image.open(image_path) as img:
+        img = fix_image_orientation(img)
+        return optimize_image_bytes(img, Path(image_path).name, max_size_kb)
+
+
+def process_pdf(pdf_path: str) -> List[dict]:
+    if not fitz:
+        logger.error("❌ Библиотека PyMuPDF не установлена! PDF игнорируются.")
+        return []
+    parts = []
+    pdf_document = fitz.open(pdf_path)
+    for page_num in range(len(pdf_document)):
+        page = pdf_document[page_num]
+        pix = page.get_pixmap(matrix=fitz.Matrix(300 / 72, 300 / 72))
+        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+        optimized_data = optimize_image_bytes(img, f"{Path(pdf_path).name}_page_{page_num + 1}")
+        parts.append({"mime_type": "image/jpeg", "data": optimized_data})
+    return parts
+
+
+def validate_extracted_data(data: Dict) -> bool:
+    if 'deceased' not in data:
+        logger.error("❌ Отсутствует обязательный блок deceased")
+        return False
+    if 'services' not in data:
+        logger.warning("⚠️ Отсутствует блок services")
+        data['services'] = []
+    return True
+
+
+def prepare_input_files(file_paths: List[str]) -> List[dict]:
+    image_parts = []
+    for path in file_paths:
+        if not os.path.exists(path):
+            continue
+        mime_type, _ = mimetypes.guess_type(path)
+        if mime_type == 'application/pdf':
+            image_parts.extend(process_pdf(path))
+        else:
+            size = os.path.getsize(path)
+            if size > MAX_IMAGE_SIZE:
+                continue
+            try:
+                optimized_data = optimize_image(path)
+                image_parts.append({
+                    "mime_type": mime_type if mime_type and mime_type.startswith('image/') else 'image/jpeg',
+                    "data": optimized_data
+                })
+            except Exception as e:
+                logger.error(f"❌ Ошибка обработки {path}: {e}")
+    return image_parts
+
+
+def extract_raw_data(file_paths: List[str], retries: int = 3) -> str:
+    logger.info("👀 АГЕНТ 1: Оцифровка бланка...")
+    start_time = time.time()
+    image_parts = prepare_input_files(file_paths)
+    if not image_parts: return "{}"
+
+    prompt = """
+    Твоя задача — извлечь структурированные данные из фотографий рукописного бланка ритуального заказа.
+
+    ВАЖНЫЕ БЛОКИ:
+    1. ПОКОЙНЫЙ: ФИО, дата рождения, дата смерти, дата похорон, кладбище.
+    2. ЗАКАЗЧИК: ФИО, телефон.
+    3. ТРАНСПОРТ: все отмеченные пункты из блоков 'Транспортування' и 'Автотранспорт'. Указывай количество мест.
+    4. УСЛУГИ: все пункты из 'Послуги для поховання' и 'Оренда'.
+    5. ТОВАРЫ и АТРИБУТИКА: 'Труна', 'Хрест', 'Вінок', 'Стрічка', 'Хусточки', 'Свічки'.
+
+    🚨 РАСПОЗНАВАНИЕ КОЛИЧЕСТВА:
+    Цифру запиши в 'quantity', название (без цифры) в 'name'. Если цифры нет — quantity = 1.
+
+    Верни ТОЛЬКО JSON:
+    {
+      "deceased": {"fio": "", "birth_date": "", "death_date": "", "burial_date": "", "cemetery": ""},
+      "customer": {"fio": "", "phone": ""},
+      "services": [{"name": "", "price": 0, "quantity": 1}]
+    }
+    НИКАКИХ комментариев. СТРОГО с { и до }.
+    """
+
+    content = [prompt] + image_parts
+
+    for attempt in range(retries):
+        try:
+            response = VISION_MODEL.generate_content(content, generation_config={"temperature": 0.0})
+            data = safe_parse_json(response.text, expected_type='object')
+
+            if not data or not isinstance(data, dict):
+                raise ValueError("Ответ не словарь или пуст")
+
+            if 'services' in data:
+                data['services'] = deduplicate_services(data['services'])
+
+            if not validate_extracted_data(data):
+                raise ValueError("Невалидная структура данных")
+
+            elapsed = time.time() - start_time
+            import json
+            return json.dumps(data, ensure_ascii=False)
+
+        except Exception as e:
+            logger.warning(f"⚠️ Ошибка: {e}")
+            time.sleep(2 ** attempt)
+
+    return "{}"
+
+====================
+FILE: src\ai_parser.py
+====================
+
+import logging
+from src.agent_vision import extract_raw_data
+from src.agent_logic import validate_and_normalize
+
+logger = logging.getLogger(__name__)
+
+
+# Добавили booked_in_1c
+def parse_images_with_gemini(image_paths: list, num_addresses: int, booked_in_1c: list) -> tuple[str, dict]:
+    logger.info("🔄 Запускаю конвейер Nier:Automato...")
+
+    raw_json_str = extract_raw_data(image_paths)
+    if not raw_json_str or raw_json_str == "{}":
+        logger.error("❌ AGENT 1 вернул пустые данные.")
+        return "", {}
+
+    # Передаем брони второму агенту
+    final_data = validate_and_normalize(raw_json_str, num_addresses, booked_in_1c)
+
+    if not final_data:
+        logger.error("❌ AGENT 2 не смог применить бизнес-логику.")
+        return raw_json_str, {}
+
+    logger.info("✅ Конвейер успешно завершен.")
+    return raw_json_str, final_data
+
+====================
+FILE: src\config.py
+====================
+
+import json
+
+# --- НАСТРОЙКИ AI МОДЕЛЕЙ ---
+VISION_MODEL_NAME = 'gemini-3-flash-preview'
+TEXT_MODEL_NAME = 'gemini-3.1-flash-lite-preview'
+BOOKED_MODEL_NAME = 'gemini-3.1-flash-lite-preview'
+
+# --- ПОЛНЫЙ СКЛАДСКОЙ СПИСОК ---
+SERVICES_LIST = [
+    # Блок 3: Инстанции
+    "Послуги СП КПО", "доки", "Послуги моргу",
+    # Блок 4: Подготовка и транспорт
+    "Транспортування", "Пакет/Плівка/Бокс", "Сейф-комплект", "Помити/одягти",
+    "Завантаження/розвантаження", "Укладання в труну", "Знесення по поверхах",
+    "Антибакт. обробка тіла", "Антибакт. обробка приміщення", "Вологе прибирання",
+    "Прибирання гнильних змін", "Доставка", "Збереження", "Розпакування контейнера",
+    # Блок 5: Автотранспорт
+    "Катафалк", "Доставка ритуального приладдя", "Перевезення покійного",
+    "Автотранспорт під вінки", "Автотранспорт під атрибут", "Лімузин",
+    "Доп 18 місць (Автотранспорт под людей)",
+    "Доп 18 місць (Підвищеної комфортності) (Автотранспорт под людей)",
+    "Доп 30 місць (Автотранспорт под людей)",
+    "Доп 30 місць (Підвищеної комфортності) (Автотранспорт под людей)",
+    # Блок 6: Проведение
+    "Церемоніймейстер", "Церемоніймейстер-РАНГ 2-й", "Церемоніймейстер-РАНГ 1-й",
+    "церемоніймейстер (доп. точка)", "церемоніймейстер (до 100км)",
+    "Поминальна панахида", "Послуги персоналу для поховання", "снос", "снос-ескорт",
+    "снос (доп. точка)", "снос (до 100км)", "Пронос труни", "Послуги священика",
+    "Послуги храму", "Послуги диякона", "Хор (півчі)", "Громадянська панахида",
+    "Викопування мог.", "Прибирання мог.", "Демонтаж", "Розбір", "Насипний пагорб",
+    "Встанов. хреста", "Декор могили", "Декор могили + прощалка", "Атласна дор.",
+    "Закопування/опускання труни", "Намет", "Альтанка", "Подіум", "Шатер",
+    "Духовий оркестр", "Ліфт",
+    # Блок 7-8: Товары и Атрибутика
+    "Труна", "Хрест", "Табличка на хрест", "Напис на хрест", "Вінок", "Стрічка",
+    "Портрет у рамці", "Портрет пластик", "Хусточки", "Свічки", "Панахида для священика",
+    "Колево", "Рит. набір", "Комплект рушників", "Рушник на хрест", "Рушник на портрет",
+    "Рушник на кришку труни", "Хрестик на труну", "Ікона", "Косинка", "Подушка",
+    "Покривало", "Капці", "Білий одяг", "Костюм", "Сукня", "Сарафан", "Табличка тимчасова",
+    # Блок 9: Аренда и прочее
+    "Свічники", "Підставки под труну", "Підставки під портрет", "Мольберт", "Столик",
+    "Стілець", "Ваза", "Стійки під вінки", "Комплект для вмивання рук", "Грунт для урни",
+    # Блок 11: Урна
+    "Доставка урни", "Підпоховання урни", "Урна", "Запайка"
+]
+
+# КЛАДБИЩА
+CEMETERIES_DICT = {
+    "Західне": "Западное", "Западное": "Западное",
+    "Крематор": "Крематорий", "Крематорий": "Крематорий",
+    "2-е христианское": "2-е христианское", "2-е Християнське": "2-е христианское",
+    "3-е еврейское": "3-е еврейское",
+    "Н.гор": "Новогородское", "Новогородское": "Новогородское", "н. гор": "Новогородское",
+    "Северное": "Северное", "Крыжановка": "Крыжановка", "Южное": "Южное",
+    "р.с": "Слободское", "Кривая балка": "Кривая балка", "Троицкое": "Троицкое",
+    "Латовка": "Латовка", "Усатово": "Усатово", "Черноморка": "Черноморка",
+    "Дм. Донского": "Дм. Донского", "Лески": "Лески", "Фонтанка": "Фонтанка",
+    "Корсунцы": "Корсунцы", "Красноселка": "Красноселка", "Ильичанка": "Ильичанка",
+    "Александровка": "Александровка", "Светлое": "Светлое", "Нерубайское": "Нерубайское",
+    "Великая балка": "Великая балка", "Холодная балка": "Холодная балка",
+    "Авангард": "Авангард", "Хлебодарское": "Хлебодарское", "Великий дальник": "Великий дальник",
+    "Дачное": "Дачное", "Лиманка": "Лиманка", "Сухой Лиман": "Сухой Лиман",
+    "Прилиманское": "Прилиманское", "Новая Долина": "Новая Долина",
+    "Бурлачья балка": "Бурлачья балка", "Малодолинское": "Малодолинское",
+    "Черноморск": "Черноморск", "Овидиополь": "Овидиополь", "Беляевка": "Беляевка",
+    "Санжейка": "Санжейка", "Грибовка": "Грибовка", "Маяки": "Маяки",
+    "Выгода": "Выгода", "Визирка": "Визирка", "Доброслав": "Доброслав"
+}
+
+# --- БИЗНЕС-ТАРИФЫ ---
+PRICES = {
+    "extra_point": 400,
+    "transport_base": 1000,
+    "snos_base": 1300,
+    "snos_escort_base": 2000
+}
+
+PERSONNEL_TARIFFS = {
+    5200: ("снос", 4),
+    7800: ("снос", 6),
+    10400: ("снос", 8),
+    8000: ("снос-ескорт", 4),
+    12000: ("снос-ескорт", 6),
+    16000: ("снос-ескорт", 8)
+}
+
+SERVICES_JSON = json.dumps(SERVICES_LIST, ensure_ascii=False)
+CEMETERIES_JSON = json.dumps(CEMETERIES_DICT, ensure_ascii=False)
+
+====================
+FILE: src\stealth_1c.py
+====================
+
+import time
+import logging
+import re
+import pyautogui
+import pyperclip
+import ctypes
+from typing import List, Optional
+
+logger = logging.getLogger(__name__)
+
+# --- Системные константы ---
+LANG_ENG = 0x0409
+LANG_RUS = 0x0419
+WM_INPUTLANGCHANGEREQUEST = 0x0050
+# Флаги: активировать и установить для всего процесса
+KLF_FLAGS = 0x00000001 | 0x00000004
+
+
+def set_layout(lang_id: int, retries: int = 3) -> bool:
+    """Устанавливает раскладку клавиатуры с проверкой через WinAPI."""
+    for attempt in range(retries):
+        try:
+            hwnd = ctypes.windll.user32.GetForegroundWindow()
+            if not hwnd:
+                time.sleep(0.1)
+                continue
+
+            # Загружаем нужную раскладку
+            layout = ctypes.windll.user32.LoadKeyboardLayoutW(f"{lang_id:08X}", KLF_FLAGS)
+
+            # Посылаем сигнал окну сменить раскладку
+            ctypes.windll.user32.SendMessageW(hwnd, WM_INPUTLANGCHANGEREQUEST, 0, layout)
+
+            time.sleep(0.15)  # Пауза на применение
+
+            # Проверяем, что реально стоит нужная раскладка (сравниваем младшее слово ID)
+            current_layout = ctypes.windll.user32.GetKeyboardLayout(0)
+            if (current_layout & 0xFFFF) == (lang_id & 0xFFFF):
+                return True
+        except Exception as e:
+            logger.debug(f"Попытка смены языка {attempt + 1} не удалась: {e}")
+            time.sleep(0.1)
+
+    return False
+
+
+def wait_for_window(title_part: str, timeout: int = 5) -> bool:
+    """Ожидает появления окна."""
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        hwnd = ctypes.windll.user32.GetForegroundWindow()
+        if hwnd:
+            length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
+            buff = ctypes.create_unicode_buffer(length + 1)
+            ctypes.windll.user32.GetWindowTextW(hwnd, buff, length + 1)
+            if title_part.lower() in buff.value.lower():
+                return True
+        time.sleep(0.3)
+    return False
+
+
+def safe_copy_to_clipboard(max_wait: float = 2.0) -> Optional[str]:
+    """Безопасное копирование данных из 1С."""
+    try:
+        old_content = pyperclip.paste()
+
+        # Выделяем всё и копируем
+        pyautogui.hotkey('ctrl', 'a')
+        time.sleep(0.2)
+        pyautogui.hotkey('ctrl', 'c')
+
+        # Цикл ожидания обновления буфера
+        start_time = time.time()
+        while time.time() - start_time < max_wait:
+            new_content = pyperclip.paste()
+            # Если в буфере что-то новое или хотя бы не пусто (если старый был пуст)
+            if new_content and new_content != old_content:
+                return new_content
+            time.sleep(0.1)
+
+        # Вторая попытка копирования, если первая не прошла
+        pyautogui.hotkey('ctrl', 'c')
+        time.sleep(0.3)
+        return pyperclip.paste()
+    except Exception as e:
+        logger.error(f"❌ Ошибка буфера: {e}")
+        return None
+
+
+def parse_1c_table(text: str) -> List[str]:
+    """Парсит текст из 1С, учитывая разные разделители и колонки."""
+    if not text or not text.strip(): return []
+
+    lines = [line.strip() for line in text.strip().split('\n') if line.strip()]
+    if len(lines) < 2: return []
+
+    # Определяем разделитель
+    first_line = lines[0]
+    if '\t' in first_line:
+        header = first_line.split('\t')
+        separator = '\t'
+    else:
+        # Если 1С выдала пробелы вместо табов
+        header = re.split(r'\s{2,}', first_line)
+        separator = r'\s{2,}'
+
+    # Ищем индекс колонки (расширенный поиск)
+    name_idx = -1
+    target_cols = ["номенклатура", "наименование", "товар", "послуга", "услуга", "изделие"]
+
+    for i, col in enumerate(header):
+        col_clean = col.strip().lower()
+        if any(target in col_clean for target in target_cols):
+            name_idx = i
+            break
+
+    if name_idx == -1:
+        logger.error(f"❌ Колонку не нашли. Заголовки: {header[:4]}")
+        return []
+
+    items = []
+    for line in lines[1:]:
+        cols = line.split('\t') if separator == '\t' else re.split(separator, line)
+        if len(cols) > name_idx:
+            val = cols[name_idx].strip().strip('"').strip("'")
+            # Нормализуем пробелы и проверяем длину
+            val = ' '.join(val.split())
+            if len(val) > 2:
+                items.append(val)
+
+    # Уникальные значения с сохранением порядка
+    return list(dict.fromkeys(items))
+
+
+def get_booked_items_from_1c(timeout: int = 10) -> List[str]:
+    """Главная функция для 1С стелс-интеграции."""
+    logger.info("🔍 Ниндзя готовится к прыжку в 1С...")
+
+    if not wait_for_window("Вывести список", timeout):
+        logger.warning("⚠️ Окно 1С не найдено. Нажми Enter в консоли, когда подготовишь окно...")
+        input("Нажми Enter для продолжения...")
+
+    try:
+        # Устанавливаем ENG раскладку для команд
+        if not set_layout(LANG_ENG):
+            logger.error("❌ Не удалось переключить раскладку! Ctrl+C может не сработать.")
+            # Продолжаем на удачу
+
+        time.sleep(0.3)
+        raw_text = safe_copy_to_clipboard()
+
+        # Закрываем временное окно 1С (Alt+F4 или Ctrl+F4)
+        pyautogui.hotkey('ctrl', 'f4')
+
+        if not raw_text:
+            logger.error("❌ Данные из 1С не получены.")
+            return []
+
+        result = parse_1c_table(raw_text)
+        logger.info(f"✅ Из 1С успешно вытянуто уникальных позиций: {len(result)}")
+        return result
+
+    except Exception as e:
+        logger.error(f"❌ Фатальный сбой стелс-модуля: {e}")
+        return []
+    finally:
+        # Железно возвращаем раскладку на базу
+        set_layout(LANG_RUS)
+
+====================
+FILE: src\utils.py
+====================
+
+import re
+import json
+import logging
+from typing import Any, Dict, List, Optional, Union
+from pathlib import Path
+from datetime import datetime
+import math
+
+logger = logging.getLogger(__name__)
+
+# Константы для защиты БД
+MAX_PG_INT = 2147483647
+MIN_PG_INT = -2147483648
+
+# Символы-маркеры списка для удаления
+LIST_MARKERS = r'^[\s\d]*[-\*•·]\s*'
+
+
+# ==================== ОЧИСТКА JSON ====================
+
+def clean_json_response(text: Any, expected_type: str = 'object') -> str:
+    """
+    Универсальная очистка JSON от markdown и мусора.
+
+    Args:
+        text: Сырой текст от нейронки (может быть None)
+        expected_type: 'object' для {...} или 'array' для [...]
+
+    Returns:
+        Очищенную JSON-строку или пустую строку
+    """
+    if text is None:
+        return ""
+
+    # Преобразуем в строку, если пришел не текст
+    text = str(text).strip()
+
+    # Убираем markdown-обертки
+    text = re.sub(r'^```json\s*', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'^```\s*', '', text)
+    text = re.sub(r'\s*```$', '', text)
+
+    # Ищем нужную структуру
+    if expected_type == 'object':
+        start = text.find('{')
+        end = text.rfind('}')
+        if start != -1 and end != -1 and start < end:
+            return text[start:end + 1]
+    else:  # array
+        start = text.find('[')
+        end = text.rfind(']')
+        if start != -1 and end != -1 and start < end:
+            return text[start:end + 1]
+
+    # Если ничего не нашли, возвращаем оригинал (но без лишних пробелов)
+    return text.strip()
+
+
+def safe_parse_json(text: Any, expected_type: str = 'object') -> Optional[Union[Dict, List]]:
+    """
+    Безопасно парсит JSON с предварительной очисткой.
+
+    Returns:
+        Распарсенный объект или None при ошибке
+    """
+    try:
+        cleaned = clean_json_response(text, expected_type)
+        if not cleaned:
+            return None
+        return json.loads(cleaned)
+    except (json.JSONDecodeError, TypeError, ValueError) as e:
+        logger.debug(f"JSON parse error: {e}")
+        return None
+
+
+# ==================== РАБОТА С ЧИСЛАМИ ====================
+
+def parse_number_string(value: str) -> Optional[float]:
+    """
+    Парсит строку с числом, учитывая разные форматы.
+
+    Примеры:
+        "3,200.50" → 3200.5
+        "1 500 грн" → 1500.0
+        "10.5 $" → 10.5
+    """
+    if not isinstance(value, str):
+        return None
+
+    # Убираем пробелы и символы валют
+    cleaned = re.sub(r'[₴₽$€]|\b(грн|руб|usd|eur)\b', '', value, flags=re.I)
+    cleaned = cleaned.strip()
+
+    # Если строка пустая, выходим
+    if not cleaned:
+        return None
+
+    # Заменяем пробелы между цифрами
+    cleaned = re.sub(r'(?<=\d)\s+(?=\d)', '', cleaned)
+
+    # Определяем формат числа
+    if ',' in cleaned and '.' in cleaned:
+        # Формат типа "3,200.50" - запятая как разделитель тысяч
+        if cleaned.index(',') < cleaned.index('.'):
+            # Убираем запятые (разделители тысяч)
+            cleaned = cleaned.replace(',', '')
+        else:
+            # Европейский формат: "3.200,50" - точка как разделитель тысяч
+            cleaned = cleaned.replace('.', '').replace(',', '.')
+    elif ',' in cleaned:
+        # Только запятая - может быть разделителем тысяч или десятичным
+        # Проверяем, есть ли после запятой ровно 2 цифры (обычно копейки)
+        parts = cleaned.split(',')
+        if len(parts) == 2 and len(parts[1]) in (1, 2) and parts[1].isdigit():
+            # Скорее всего десятичная запятая
+            cleaned = cleaned.replace(',', '.')
+        else:
+            # Скорее всего разделитель тысяч
+            cleaned = cleaned.replace(',', '')
+
+    # Убираем все оставшиеся пробелы
+    cleaned = re.sub(r'\s+', '', cleaned)
+
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
+
+
+def safe_int(value: Any, default: int = 0) -> int:
+    """
+    Безопасное преобразование в int с защитой от переполнения БД.
+
+    Args:
+        value: Любое значение (строка, число, None)
+        default: Значение по умолчанию при ошибке или переполнении
+
+    Returns:
+        int в пределах [MIN_PG_INT, MAX_PG_INT] или default
+    """
+    if value is None:
+        return default
+
+    # Если уже число
+    if isinstance(value, (int, float)):
+        # Проверяем на бесконечность и NaN
+        if isinstance(value, float) and (math.isinf(value) or math.isnan(value)):
+            return default
+
+        # Проверяем границы БД
+        if MIN_PG_INT <= value <= MAX_PG_INT:
+            return int(value)
+        return default
+
+    # Если строка
+    if isinstance(value, str):
+        # Пробуем распарсить число
+        num = parse_number_string(value)
+        if num is not None:
+            # Проверяем границы
+            if MIN_PG_INT <= num <= MAX_PG_INT:
+                return int(num)
+        return default
+
+    # Всё остальное
+    return default
+
+
+# ==================== РАБОТА С ТЕКСТОМ ====================
+
+def clean_service_name(name: Any) -> str:
+    """
+    Очищает название услуги от мусора и маркеров списка.
+
+    Удаляет:
+        - Маркеры списка в начале (-, *, •, ·, 1., 2. и т.д.)
+        - Лишние кавычки и пробелы
+        - Висячие дефисы в конце
+    """
+    if name is None:
+        return ""
+
+    if not isinstance(name, str):
+        name = str(name)
+
+    # Сохраняем оригинал для проверки
+    original = name
+
+    # Удаляем маркеры списка в начале (включая точки после цифр)
+    name = re.sub(LIST_MARKERS, '', name)
+
+    # Если после удаления маркера строка не изменилась, пробуем удалить конкретные символы
+    if name == original and original and original[0] in ('-', '*', '•', '·'):
+        name = original[1:].lstrip()
+
+    # Убираем кавычки разного типа
+    name = name.strip('"\'«»„“')
+
+    # Нормализуем пробелы
+    name = re.sub(r'\s+', ' ', name)
+
+    # Убираем висячие дефисы в конце
+    name = re.sub(r'[-–—]\s*$', '', name)
+
+    return name.strip()
+
+
+def deduplicate_services(services: List[Dict]) -> List[Dict]:
+    """Удаляет дубликаты услуг, суммируя количество и забирая макс. цену."""
+    if not services:
+        return []
+
+    unique = {}
+    for s in services:
+        if not isinstance(s, dict):
+            continue
+
+        name = clean_service_name(s.get('name', ''))
+        if not name or len(name) < 2:
+            continue
+
+        key = name.lower()
+        if key in unique:
+            # Суммируем количество
+            unique[key]['quantity'] += safe_int(s.get('quantity', 1), default=1)
+            # Берем максимальную цену
+            unique[key]['price'] = max(
+                unique[key].get('price', 0),
+                safe_int(s.get('price', 0))
+            )
+            # Сумму пересчитаем позже
+            if 'sum' in unique[key]:
+                del unique[key]['sum']
+        else:
+            unique[key] = {
+                'name': name,
+                'quantity': safe_int(s.get('quantity', 1), default=1),
+                'price': safe_int(s.get('price', 0))
+            }
+            if 'sum' in s:
+                unique[key]['sum'] = safe_int(s.get('sum', 0))
+
+    # Пересчитываем сумму для каждой услуги
+    result = list(unique.values())
+    for item in result:
+        if 'sum' not in item:
+            item['sum'] = item['quantity'] * item['price']
+
+    return result
+
+====================
+FILE: src\validator.py
+====================
+
+import logging
+from datetime import datetime
+from pydantic import BaseModel, Field, field_validator, ValidationError
+
+logger = logging.getLogger(__name__)
+
+
+# --- PYDANTIC СХЕМЫ ---
+class Deceased(BaseModel):
+    fio: str = Field(default="НЕ УКАЗАНО")
+    birth_date: str = Field(default="01.01.1920")
+    death_date: str = Field(default="")
+    burial_date: str = Field(default="")
+    cemetery: str = Field(default="")
+
+
+class Customer(BaseModel):
+    fio: str = Field(default="")
+    phone: str = Field(default="")
+
+
+class Service(BaseModel):
+    name: str
+    price: int
+    quantity: int = Field(default=1)
+
+    @field_validator('price', 'quantity')
+    def must_be_positive(cls, v):
+        if v < 0:
+            raise ValueError('Значение не может быть отрицательным')
+        return v
+
+
+class OrderData(BaseModel):
+    deceased: Deceased
+    customer: Customer
+    services: list[Service]
+    warnings: list[str] = []
+    calculated_total: int = 0
+
+
+# --- БИЗНЕС-ЛОГИКА ВАЛИДАЦИИ ---
+def validate_and_fix_order(order_data: dict) -> dict:
+    """Валидация с частичным восстановлением."""
+    logger.info("🛡️ Запуск Pydantic-валидации и контроля математики...")
+
+    clean_data = None
+
+    try:
+        # Пробуем проглотить целиком
+        validated_order = OrderData(**order_data)
+        clean_data = validated_order.model_dump()
+    except ValidationError as e:
+        logger.error(f"❌ Обнаружены ошибки структуры JSON. Запуск спасательной операции...")
+
+        # Спасаем то, что можем
+        fixed_data = {
+            'deceased': order_data.get('deceased', {}),
+            'customer': order_data.get('customer', {}),
+            'services': [],
+            'warnings': order_data.get('warnings', [])
+        }
+
+        for s in order_data.get('services', []):
+            try:
+                service = Service(**s)
+                fixed_data['services'].append(service.model_dump())
+            except ValidationError as se:
+                bad_name = s.get('name', 'НЕИЗВЕСТНО')
+                logger.warning(f"⚠️ Услуга '{bad_name}' вырезана: {se.errors()[0]['msg']}")
+                fixed_data['warnings'].append(f"Удалена некорректная услуга: {bad_name}")
+
+        try:
+            fallback = OrderData(**fixed_data)
+            clean_data = fallback.model_dump()
+        except Exception as final_e:
+            logger.error(f"❌ Фатальная ошибка спасения: {final_e}")
+            clean_data = OrderData(deceased=Deceased(), customer=Customer(), services=[]).model_dump()
+
+    # Фикс даты смерти
+    if not clean_data["deceased"]["death_date"]:
+        today_str = datetime.now().strftime("%d.%m.%Y")
+        clean_data["deceased"]["death_date"] = today_str
+        logger.warning(f"⚠️ Дата смерти пустая! Подставил сегодняшнюю: {today_str}")
+
+    # Математический контроль
+    real_total = sum(svc["price"] * svc["quantity"] for svc in clean_data["services"])
+    agent_total = clean_data.get("calculated_total", 0)
+
+    if real_total != agent_total:
+        logger.warning(f"⚠️ Математика пересчитана. Было: {agent_total}, Стало: {real_total}")
+        clean_data["calculated_total"] = real_total
+    else:
+        logger.info(f"✅ Математика сошлась: {real_total} грн.")
+
+    return clean_data
+
+====================
+FILE: src\win_1c_bot.py
+====================
+
+import time  # ВОТ ОНО, СПАСЕНИЕ ОТ NameError!
+import pyautogui
+import logging
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+TEMPLATES_DIR = BASE_DIR / "data" / "templates"
+
+def click_tab_by_image(image_filename: str, confidence: float = 0.8) -> bool:
+    """Ищет вкладку на экране по картинке и кликает по ней."""
+    image_path = str(TEMPLATES_DIR / image_filename)
+
+    try:
+        location = pyautogui.locateCenterOnScreen(image_path, confidence=confidence)
+
+        if location:
+            pyautogui.click(location)
+            logger.info(f"✅ Успешно кликнул по вкладке: {image_filename}")
+            time.sleep(0.3)
+            return True
+        else:
+            logger.warning(f"⚠️ Не смог найти вкладку на экране: {image_filename}")
+            return False
+
+    except pyautogui.ImageNotFoundException:
+        logger.warning(f"⚠️ Картинка {image_filename} вообще не найдена на экране.")
+        return False
+    except Exception as e:
+        logger.error(f"❌ Ошибка компьютерного зрения: {e}")
+        return False
+
+====================
+FILE: src\__init__.py
+====================
+
+
+
+====================
+FILE: tests\test_utils.py
+====================
+
+import pytest
+import math
+from hypothesis import given, strategies as st, assume
+from src.utils import safe_int, clean_service_name, clean_json_response, safe_parse_json
+
+# ==========================================
+# КОНСТАНТЫ ДЛЯ ТЕСТОВ
+# ==========================================
+MAX_PG_INT = 2147483647
+MIN_PG_INT = -2147483648
+
+
+# ==========================================
+# ТЕСТЫ ДЛЯ safe_int
+# ==========================================
+
+@given(st.integers(min_value=MIN_PG_INT, max_value=MAX_PG_INT))
+def test_safe_int_returns_same_integer(val):
+    """Числа в пределах БД не должны меняться."""
+    assert safe_int(val) == val
+
+
+@given(st.integers().filter(lambda x: x > MAX_PG_INT or x < MIN_PG_INT))
+def test_safe_int_handles_db_overflow(val):
+    """Числа вне лимитов БД должны возвращать default (защита от переполнения)."""
+    assert safe_int(val, default=0) == 0
+    # Проверяем с другим дефолтом
+    assert safe_int(val, default=999) == 999
+
+
+@given(st.floats(allow_nan=False, allow_infinity=False))
+def test_safe_int_handles_floats(val):
+    """
+    Дроби должны конвертироваться, но с защитой от переполнения БД.
+    Если float в пределах БД - конвертируем, если нет - default.
+    """
+    result = safe_int(val)
+    assert isinstance(result, int)
+
+    # Учитываем защиту БД
+    if MIN_PG_INT <= val <= MAX_PG_INT:
+        assert result == int(val)
+    else:
+        assert result == 0  # default
+
+
+def test_safe_int_infinity_and_nan():
+    """Явная проверка обработки бесконечностей и NaN."""
+    test_cases = [
+        (float('inf'), 0),
+        (float('-inf'), 0),
+        (float('nan'), 0),
+        ("Infinity", 0),
+        ("-Infinity", 0),
+        ("NaN", 0),
+    ]
+
+    for value, expected in test_cases:
+        assert safe_int(value, default=0) == expected
+        # Проверяем с кастомным дефолтом
+        assert safe_int(value, default=42) == 42
+
+
+def test_safe_int_preserves_sign():
+    """Проверка, что отрицательные числа сохраняют знак (если в пределах БД)."""
+    test_cases = [
+        ("-100", -100),
+        ("-100.5", -100),
+        ("  -100  грн ", -100),
+        ("-2147483648", -2147483648),  # MIN_PG_INT
+        ("-2147483649", 0),  # Вне лимита -> default
+    ]
+
+    for value, expected in test_cases:
+        assert safe_int(value, default=0) == expected
+
+
+def test_safe_int_edge_cases():
+    """Проверка граничных значений с защитой БД."""
+    assert safe_int(str(MAX_PG_INT)) == MAX_PG_INT
+    assert safe_int(str(MIN_PG_INT)) == MIN_PG_INT
+
+    # Числа вне диапазона
+    assert safe_int(str(MAX_PG_INT + 1), default=0) == 0
+    assert safe_int(str(MIN_PG_INT - 1), default=0) == 0
+
+    # Граничные значения как float
+    assert safe_int(float(MAX_PG_INT)) == MAX_PG_INT
+    assert safe_int(float(MAX_PG_INT) + 0.5, default=0) == 0
+
+
+@given(st.text())
+def test_safe_int_never_crashes_on_garbage_text(text):
+    """Самый жесткий тест. Любой текст -> int без ошибок."""
+    result = safe_int(text, default=0)
+    assert isinstance(result, int)
+
+
+def test_safe_int_known_cases():
+    """Точечные проверки реальных кейсов."""
+    test_cases = [
+        ("  1 500 грн ", 1500),
+        ("10.5 $", 10),
+        (None, 99, 99),  # с кастомным default
+        ("", 0),
+        ("   ", 0),
+        ("0", 0),
+        ("-0", 0),
+        ("3,200.50", 3200),
+        ("ціна 500", 500),
+        ("500.00", 500),
+        ("500.99", 500),  # округление вниз (int())
+    ]
+
+    for case in test_cases:
+        if len(case) == 3:
+            value, expected, default = case
+            assert safe_int(value, default) == expected
+        else:
+            value, expected = case
+            assert safe_int(value) == expected
+
+
+# ==========================================
+# ТЕСТЫ ДЛЯ clean_service_name
+# ==========================================
+
+@given(st.text())
+def test_clean_service_name_never_crashes(text):
+    """Любая дичь на входе -> строка."""
+    result = clean_service_name(text)
+    assert isinstance(result, str)
+
+
+@given(st.text())
+def test_clean_service_name_strips_spaces_and_hyphens(text):
+    """После очистки по краям не должно быть мусора."""
+    result = clean_service_name(text)
+    if result:
+        assert result == result.strip()
+        # В начале не должно быть маркеров списка
+        assert not result.startswith(('-', '*', '•', '·'))
+        # В конце не должно быть висячих дефисов
+        assert not result.endswith(('-', '—', '–'))
+
+
+def test_clean_service_name_known_cases():
+    """Проверка реальных кейсов с учетом новых правил."""
+    test_cases = [
+        ("  Труна  ", "Труна"),
+        ("- Вінок", "Вінок"),
+        ("* Хусточки", "Хусточки"),
+        ("«Свічки»", "Свічки"),
+        ("  -   Катафалк   ", "Катафалк"),
+        ("1. Труна (глянцева)", "Труна (глянцева)"),
+        ("• Пронос труни", "Пронос труни"),
+        ("· Подушка", "Подушка"),
+        (None, ""),  # <-- ВАЖНО: теперь пустая строка, а не "None"
+        ("", ""),
+        ("   ", ""),
+        ("-", ""),
+        ("*", ""),
+        ("123", "123"),  # цифры сохраняются
+        ("-123", "123"),  # дефис в начале удаляется
+    ]
+
+    for input_val, expected in test_cases:
+        assert clean_service_name(input_val) == expected
+
+
+# ==========================================
+# ТЕСТЫ ДЛЯ clean_json_response
+# ==========================================
+
+def test_clean_json_response_removes_markdown():
+    """Проверка удаления markdown-блоков."""
+    test_cases = [
+        ("```json\n{\"key\": \"value\"}\n```", "{\"key\": \"value\"}"),
+        ("```\n{\"key\": \"value\"}\n```", "{\"key\": \"value\"}"),
+        ("Текст до\n{\"key\": \"value\"}\nТекст после", "{\"key\": \"value\"}"),
+        ("```json\n[1, 2, 3]\n```", "[1, 2, 3]"),
+        ("```\n[1, 2, 3]\n```", "[1, 2, 3]"),
+        ("Текст\n[1, 2, 3]\nТекст", "[1, 2, 3]"),
+        ("{без оберток}", "{без оберток}"),
+    ]
+
+    for dirty, expected in test_cases:
+        assert clean_json_response(dirty) == expected
+
+
+def test_clean_json_response_with_expected_type():
+    """Проверка параметра expected_type."""
+    response = "Текст\n[1, 2, 3]\nТекст"
+
+    # Для array ищем скобки []
+    assert clean_json_response(response, expected_type='array') == "[1, 2, 3]"
+
+    # Для object ищем {} (и не находим)
+    assert clean_json_response(response, expected_type='object') == response.strip()
+
+    # Смешанный контент
+    mixed = "Текст\n{\"a\": 1}\nТекст\n[1, 2, 3]\nТекст"
+    assert clean_json_response(mixed, expected_type='object') == "{\"a\": 1}"
+    assert clean_json_response(mixed, expected_type='array') == "[1, 2, 3]"
+
+
+def test_clean_json_response_empty_input():
+    """Проверка на пустые значения."""
+    assert clean_json_response("") == ""
+    assert clean_json_response(None) == ""
+    assert clean_json_response("   ") == "   "  # пробелы сохраняются
+
+
+# ==========================================
+# ТЕСТЫ ДЛЯ safe_parse_json
+# ==========================================
+
+def test_safe_parse_json_valid():
+    """Проверка парсинга валидного JSON."""
+    assert safe_parse_json('{"key": "value"}') == {"key": "value"}
+    assert safe_parse_json('[1, 2, 3]', expected_type='array') == [1, 2, 3]
+    assert safe_parse_json('{"nested": {"a": 1}}') == {"nested": {"a": 1}}
+
+
+def test_safe_parse_json_with_markdown():
+    """Проверка парсинга JSON с markdown-оберткой."""
+    test_cases = [
+        ("```json\n{\"key\": \"value\"}\n```", {"key": "value"}),
+        ("```\n{\"key\": \"value\"}\n```", {"key": "value"}),
+        ("Текст до\n{\"key\": \"value\"}\nТекст после", {"key": "value"}),
+        ("```json\n[1, 2, 3]\n```", [1, 2, 3]),
+    ]
+
+    for dirty, expected in test_cases:
+        result = safe_parse_json(dirty)
+        assert result == expected
+
+
+def test_safe_parse_json_broken():
+    """Обработка битого JSON."""
+    test_cases = [
+        '<html>502 Bad Gateway</html>',
+        '{"incomplete":',
+        '[1, 2, 3',
+        'null',
+        'undefined',
+        'True',  # Python bool, не JSON
+        'None',
+        '',
+        None,
+    ]
+
+    for broken in test_cases:
+        assert safe_parse_json(broken) is None
+        # Проверяем с явным указанием типа
+        assert safe_parse_json(broken, expected_type='object') is None
+        assert safe_parse_json(broken, expected_type='array') is None
+
+
+# ==========================================
+# СТРЕСС-ТЕСТЫ (PROPERTY-BASED)
+# ==========================================
+
+@given(st.recursive(
+    st.none() | st.booleans() | st.integers() | st.floats() | st.text(),
+    lambda children: st.lists(children) | st.dictionaries(st.text(), children),
+    max_leaves=10
+))
+def test_safe_parse_json_roundtrip(obj):
+    """Проверка: JSON -> строка -> парсинг -> объект должен совпадать."""
+    import json
+    try:
+        json_str = json.dumps(obj)
+    except:
+        # Некоторые объекты (например, set) не сериализуются
+        return
+
+    parsed = safe_parse_json(json_str)
+    assert parsed == obj
+
+
+@given(st.text(min_size=0, max_size=1000))
+def test_clean_json_response_preserves_valid_json(text):
+    """Если строка уже является валидным JSON, очистка не должна его ломать."""
+    import json
+    try:
+        # Пробуем распарсить как JSON
+        original = json.loads(text)
+        cleaned = clean_json_response(text)
+        # Очищенная строка должна парситься в тот же объект
+        assert json.loads(cleaned) == original
+    except json.JSONDecodeError:
+        # Если это невалидный JSON, тест не применим
+        pass
+
+
+# ==========================================
+# ИНТЕГРАЦИОННЫЙ ТЕСТ (УСЛОЖНЕННАЯ ВЕРСИЯ)
+# ==========================================
+
+def test_integration_real_world_scenario_complex():
+    """Тест на сложном реальном сценарии с разными вариантами мусора."""
+
+    # Эмулируем ответ от Gemini с разными видами мусора
+    dirty_responses = [
+        # Вариант 1: с markdown и лишним текстом
+        """
+        Вот извлеченные данные:
+        ```json
+        {
+            "services": [
+                {"name": "- Труна", "quantity": "2 шт", "price": "5 000 грн"},
+                {"name": "* Вінок", "quantity": "3", "price": "500.50"},
+                {"name": "  Хусточки  ", "quantity": "inf", "price": null},
+                {"name": "• Свічки", "quantity": "10", "price": "45.00"}
+            ]
+        }"""
+]
+
+====================
+FILE: tests\__init__.py
+====================
+
+
+
+====================
+FILE: tests\.pytest_cache\.gitignore
+====================
+
+# Created by pytest automatically.
+*
+
+
+====================
+FILE: tests\.pytest_cache\README.md
+====================
+
+# pytest cache directory #
+
+This directory contains data from the pytest's cache plugin,
+which provides the `--lf` and `--ff` options, as well as the `cache` fixture.
+
+**Do not** commit this to version control.
+
+See [the docs](https://docs.pytest.org/en/stable/how-to/cache.html) for more information.
