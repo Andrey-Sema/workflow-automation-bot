@@ -41,34 +41,54 @@ class OrderData(BaseModel):
 
 # --- БИЗНЕС-ЛОГИКА ВАЛИДАЦИИ ---
 def validate_and_fix_order(order_data: dict) -> dict:
+    """Валидация с частичным восстановлением."""
     logger.info("🛡️ Запуск Pydantic-валидации и контроля математики...")
 
-    # 1. Жесткая валидация структуры (Pydantic)
-    try:
-        validated_order = OrderData(**order_data)
-        clean_data = validated_order.model_dump()  # Превращаем обратно в чистый dict
-    except ValidationError as e:
-        logger.error(f"❌ КРИТИЧЕСКАЯ ОШИБКА СТРУКТУРЫ JSON! LLM сошла с ума:\n{e}")
-        # Генерируем пустой, но валидный скелет данных, чтобы ничего не ебнулось дальше
-        fallback_order = OrderData(
-            deceased=Deceased(),
-            customer=Customer(),
-            services=[]
-        )
-        return fallback_order.model_dump()
+    clean_data = None
 
-    # 2. Фикс даты смерти
+    try:
+        # Пробуем проглотить целиком
+        validated_order = OrderData(**order_data)
+        clean_data = validated_order.model_dump()
+    except ValidationError as e:
+        logger.error(f"❌ Обнаружены ошибки структуры JSON. Запуск спасательной операции...")
+
+        # Спасаем то, что можем
+        fixed_data = {
+            'deceased': order_data.get('deceased', {}),
+            'customer': order_data.get('customer', {}),
+            'services': [],
+            'warnings': order_data.get('warnings', [])
+        }
+
+        for s in order_data.get('services', []):
+            try:
+                service = Service(**s)
+                fixed_data['services'].append(service.model_dump())
+            except ValidationError as se:
+                bad_name = s.get('name', 'НЕИЗВЕСТНО')
+                logger.warning(f"⚠️ Услуга '{bad_name}' вырезана: {se.errors()[0]['msg']}")
+                fixed_data['warnings'].append(f"Удалена некорректная услуга: {bad_name}")
+
+        try:
+            fallback = OrderData(**fixed_data)
+            clean_data = fallback.model_dump()
+        except Exception as final_e:
+            logger.error(f"❌ Фатальная ошибка спасения: {final_e}")
+            clean_data = OrderData(deceased=Deceased(), customer=Customer(), services=[]).model_dump()
+
+    # Фикс даты смерти
     if not clean_data["deceased"]["death_date"]:
         today_str = datetime.now().strftime("%d.%m.%Y")
         clean_data["deceased"]["death_date"] = today_str
         logger.warning(f"⚠️ Дата смерти пустая! Подставил сегодняшнюю: {today_str}")
 
-    # 3. Математический контроль
+    # Математический контроль
     real_total = sum(svc["price"] * svc["quantity"] for svc in clean_data["services"])
     agent_total = clean_data.get("calculated_total", 0)
 
     if real_total != agent_total:
-        logger.warning(f"⚠️ ВНИМАНИЕ! Математика пересчитана. Было: {agent_total}, Стало: {real_total}")
+        logger.warning(f"⚠️ Математика пересчитана. Было: {agent_total}, Стало: {real_total}")
         clean_data["calculated_total"] = real_total
     else:
         logger.info(f"✅ Математика сошлась: {real_total} грн.")

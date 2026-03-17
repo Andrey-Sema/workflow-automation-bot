@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 import google.generativeai as genai
 
 # --- ИМПОРТЫ НАШИХ МОДУЛЕЙ ---
-from src.stealth_1c import get_booked_items_from_1c
+from src.agent_booked_ocr import get_booked_items_via_screenshot
 from src.ai_parser import parse_images_with_gemini
 from src.validator import validate_and_fix_order
 
@@ -89,8 +89,8 @@ def run_cli():
         scan_1c = input("🕵️‍♂️ Сканируем открытый наряд в 1С на дубликаты? (y/n): ").strip().lower()
         booked_in_1c = []
         if scan_1c == 'y':
-            input("👉 Сделай в 1С: Правый клик по услугам -> Вывести список -> ОК. Потом нажми Enter здесь...")
-            booked_in_1c = get_booked_items_from_1c()
+            input("👉 Нажми Enter и переместись в экран наряда 1С для прчотения услуг")
+            booked_in_1c = get_booked_items_via_screenshot()
 
         photos_to_process = get_photos_for_order(num_photos)
         if not photos_to_process:
