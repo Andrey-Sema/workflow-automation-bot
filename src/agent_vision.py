@@ -2,6 +2,7 @@ import time
 import logging
 import os
 import mimetypes
+import json
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 import google.generativeai as genai
@@ -22,13 +23,11 @@ VISION_MODEL = genai.GenerativeModel(VISION_MODEL_NAME)
 MAX_IMAGE_SIZE = 20 * 1024 * 1024
 TARGET_MAX_SIZE_KB = 10 * 1024
 
-
 def fix_image_orientation(img: Image.Image) -> Image.Image:
     try:
         return ImageOps.exif_transpose(img)
     except:
         return img
-
 
 def optimize_image_bytes(img: Image.Image, filename: str = "image", max_size_kb: int = TARGET_MAX_SIZE_KB) -> bytes:
     if img.mode in ('RGBA', 'P'):
@@ -42,15 +41,12 @@ def optimize_image_bytes(img: Image.Image, filename: str = "image", max_size_kb:
         if buffer.tell() / 1024 <= max_size_kb:
             break
         quality -= 5
-    logger.debug(f"🎨 Оптимизация {filename}: → {buffer.tell() / 1024:.1f} KB, quality={quality}")
     return buffer.getvalue()
-
 
 def optimize_image(image_path: str, max_size_kb: int = TARGET_MAX_SIZE_KB) -> bytes:
     with Image.open(image_path) as img:
         img = fix_image_orientation(img)
         return optimize_image_bytes(img, Path(image_path).name, max_size_kb)
-
 
 def process_pdf(pdf_path: str) -> List[dict]:
     if not fitz:
@@ -66,16 +62,11 @@ def process_pdf(pdf_path: str) -> List[dict]:
         parts.append({"mime_type": "image/jpeg", "data": optimized_data})
     return parts
 
-
 def validate_extracted_data(data: Dict) -> bool:
     if 'deceased' not in data:
         logger.error("❌ Отсутствует обязательный блок deceased")
         return False
-    if 'services' not in data:
-        logger.warning("⚠️ Отсутствует блок services")
-        data['services'] = []
     return True
-
 
 def prepare_input_files(file_paths: List[str]) -> List[dict]:
     image_parts = []
@@ -99,33 +90,30 @@ def prepare_input_files(file_paths: List[str]) -> List[dict]:
                 logger.error(f"❌ Ошибка обработки {path}: {e}")
     return image_parts
 
-
 def extract_raw_data(file_paths: List[str], retries: int = 3) -> str:
-    logger.info("👀 АГЕНТ 1: Оцифровка бланка...")
+    logger.info("👀 АГЕНТ 1: Оцифровка бланка (Скоростной режим)...")
     start_time = time.time()
     image_parts = prepare_input_files(file_paths)
     if not image_parts: return "{}"
 
     prompt = """
-    Твоя задача — извлечь структурированные данные из фотографий рукописного бланка ритуального заказа.
+    Ты — AI-оцифровщик ритуальных бланков. Твоя цель — максимальная скорость и точность.
+    Верни СТРОГО один JSON-объект без какого-либо текста, разметки или пояснений.
 
-    ВАЖНЫЕ БЛОКИ:
-    1. ПОКОЙНЫЙ: ФИО, дата рождения, дата смерти, дата похорон, кладбище.
-    2. ЗАКАЗЧИК: ФИО, телефон.
-    3. ТРАНСПОРТ: все отмеченные пункты из блоков 'Транспортування' и 'Автотранспорт'. Указывай количество мест.
-    4. УСЛУГИ: все пункты из 'Послуги для поховання' и 'Оренда'.
-    5. ТОВАРЫ и АТРИБУТИКА: 'Труна', 'Хрест', 'Вінок', 'Стрічка', 'Хусточки', 'Свічки'.
-
-    🚨 РАСПОЗНАВАНИЕ КОЛИЧЕСТВА:
-    Цифру запиши в 'quantity', название (без цифры) в 'name'. Если цифры нет — quantity = 1.
-
-    Верни ТОЛЬКО JSON:
+    СТРУКТУРА JSON:
     {
       "deceased": {"fio": "", "birth_date": "", "death_date": "", "burial_date": "", "cemetery": ""},
       "customer": {"fio": "", "phone": ""},
-      "services": [{"name": "", "price": 0, "quantity": 1}]
+      "transport": [{"name": "", "price": 0, "quantity": 1}],
+      "services": [{"name": "", "price": 0, "quantity": 1}],
+      "goods": [{"name": "", "price": 0, "quantity": 1}],
+      "handwritten_total": 0
     }
-    НИКАКИХ комментариев. СТРОГО с { и до }.
+
+    ПРАВИЛА:
+    1. Распредели услуги в `services`, автотранспорт в `transport`, а товары (труна, вінок, хрест, подушка и т.д.) в `goods`.
+    2. `handwritten_total` — найди итоговую сумму в самом низу бланка (Сума / Разом) и запиши ТОЛЬКО число.
+    3. Если количество не указано, пиши 1.
     """
 
     content = [prompt] + image_parts
@@ -138,18 +126,20 @@ def extract_raw_data(file_paths: List[str], retries: int = 3) -> str:
             if not data or not isinstance(data, dict):
                 raise ValueError("Ответ не словарь или пуст")
 
-            if 'services' in data:
-                data['services'] = deduplicate_services(data['services'])
+            for cat in ['services', 'transport', 'goods']:
+                if cat in data:
+                    data[cat] = deduplicate_services(data[cat])
 
             if not validate_extracted_data(data):
                 raise ValueError("Невалидная структура данных")
 
             elapsed = time.time() - start_time
-            import json
+            logger.info(f"✅ АГЕНТ 1 завершил парсинг за {elapsed:.2f} сек.")
             return json.dumps(data, ensure_ascii=False)
 
         except Exception as e:
-            logger.warning(f"⚠️ Ошибка: {e}")
+            logger.warning(f"⚠️ Ошибка Агента 1 (попытка {attempt + 1}): {e}")
             time.sleep(2 ** attempt)
 
+    logger.critical("❌ Агент 1 провалил задачу.")
     return "{}"

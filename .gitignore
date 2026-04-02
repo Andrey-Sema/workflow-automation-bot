@@ -22,6 +22,7 @@ __pycache__/
 # === Дебаг, логи и скриншоты ===
 *.log
 debug_screenshots/
+full_project_code.txt
 
 # === Данные и базы ===
 *.csv
@@ -30,6 +31,7 @@ data/output/
 data/processed/
 *.sqlite3
 *.db
+data/catalog.json
 
 # Testing
 .hypothesis/

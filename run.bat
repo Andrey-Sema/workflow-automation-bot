@@ -4,7 +4,7 @@ chcp 65001 >nul
 setlocal enabledelayedexpansion
 
 echo ==========================================
-echo 🚀 Инициализация Nier:Automato...
+echo 🚀 Инициализация Workflow Automation Bot v2.0...
 echo ==========================================
 
 :: 1. Проверка на дурака: не запущен ли уже бот?
