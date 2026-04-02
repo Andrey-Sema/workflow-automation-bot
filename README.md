@@ -1,70 +1,58 @@
-Nier:Automato 🤖 (v2.0 Enterprise Edition)
-Система глубокой автоматизации бизнес-процессов для ритуального агентства. 
-Проект объединяет использование ИИ для чтения содержимого фотографий(OCR), 
-многоуровневую обработку данных ИИ-агентами и «стелс-интеграцию» с учетными системами (1С).
+🤖 Workflow Automation Bot (v2.0 Enterprise Edition)
+Deep business process automation system for a funeral service agency.
+The project integrates Computer Vision (OCR), multi-level AI-agent processing,
+and stealth integration with legacy accounting systems (1C) via WinAPI.
 
-🚀 Основные возможности
-Multi-Agent Workflow: Разделение ответственности между специализированными агентами и распределением между ними умеренной бизнес логики.
+🌟 Key Features
+🧠 Multi-Agent Pipeline
+Distributed data processing across specialized AI agents:
 
-Vision Ninja (Agent №1): Оцифровка рукописных бланков и PDF-документов через gemini-3-flash-preview. 
-Распознает даже сложный почерк и неструктурированные списки, понимает абревиатуры и сокращения.
+Vision Agent: Digitization of handwritten forms using gemini-3-flash-preview. Recognizes complex handwriting,
+abbreviations, and unstructured lists.
 
-Business Logic Engine (Agent №2): Автоматическая нормализация данных по справочникам (услуги, кладбища) и расчет сложных тарифов
-(доп. точки, снос по этажам, спец. персонал).
+Logic Engine: Automatic data normalization based on directories (services, cemeteries)
+and tariff calculation (extra points, floor carrying fees) using gemini-3.1-flash-lite-preview.
 
-1C Sync Assistant (Agent №3): Визуальный контроль дубликатов. Сканирует интерфейс 1С в реальном времени, чтобы исключить повторный ввод уже забронированных позиций.
+1C Sync Assistant: Visual duplicate control. Scans the 1C interface in real-time to prevent duplicate data entry.
 
-Stealth Integration: Работа с внешними окнами через WinAPI и эмуляцию ввода без прямого доступа к закрытым базам данных.
+🛡️ Data Integrity (Bulletproof Validation)
+Every operation passes through strict Pydantic v2 schemas.
 
-Data Integrity: «Бронированная» валидация через Pydantic. Каждая цифра и строка проходит проверку на соответствие лимитам БД и здравому смыслу.
+Includes mathematical sum checks and protection against data type overflow (PostgreSQL compatible).
 
-🛠 Технологический стек
-Core: Python 3.13
+🕶️ Stealth Integration
+Automation of external Windows applications via WinAPI (ctypes).
 
-AI Models: Google Gemini API (gemini-3-flash-preview для OCR и gemini-3.1-flash-lite-preview для логики). 
-Модели были выбраны для минимизации расходов на автоматизацию
+Keyboard input emulation and layout management without direct database access.
 
-Validation: Pydantic v2 (строгие схемы) & Hypothesis (Property-based testing)
+🧪 Resilience Testing
+Implementation of Property-based testing (Hypothesis) to uncover edge cases when parsing complex strings and numbers.
 
-Automation: PyAutoGUI, Pyperclip, keyboard, ctypes (WinAPI)
+🛠 Tech Stack
 
-OCR & PDF: PIL (Image processing), PyMuPDF (Fitz)
+Category:	Tools
+Language:	Python 3.13
+AI Stack:	Google Gemini API (Flash & Lite models)
+Validation:	Pydantic v2, Hypothesis (Testing)
+Automation:	PyAutoGUI, Keyboard, WinAPI (ctypes), Pyperclip
+Processing:	Pillow (PIL), JSON normalization
 
-Testing: Pytest
-
-nier_automato/
 ├── src/
-│   ├── agent_vision.py    # Оцифровка бланков (Агент 1)
-│   ├── agent_logic.py     # Нормализация и бизнес-правила (Агент 2)
-│   ├── agent_booked_ocr.py# OCR интерфейса 1С (Агент 3)
-│   ├── stealth_1c.py      # Низкоуровневая работа с WinAPI и раскладками
-│   ├── utils.py           # «Бронированные» утилиты (safe_int, safe_parse)
-│   ├── validator.py       # Pydantic-таможня и мат. контроль
-│   └── config.py          # Центральный конфиг, цены и справочники
-├── tests/                 # Среда тестирования с Hypothesis
-├── data/                  # Локальное хранилище данных (входы/выходы)
-├── main.py                # Точка входа (CLI-интерфейс)
-└── run.bat                # Умный инициализатор и лаунчер
+│   ├── agent_vision.py      # Digitization of forms (Agent 1)
+│   ├── agent_logic.py       # Business rules and normalization (Agent 2)
+│   ├── agent_booked_ocr.py  # Computer vision for 1C interface (Agent 3)
+│   ├── stealth_1c.py        # Low-level Windows API operations
+│   ├── validator.py         # Pydantic schemas and math control
+│   └── utils.py             # Bulletproof data processing utilities
+├── tests/                   # Test coverage (Pytest + Hypothesis)
+├── data/                    # Local storage (inputs/outputs/logs)
+└── main.py                  # Entry point (CLI Interface)
 
-В разработке также применил run.bat для автоматической настройки окружения, работает так:
+🚀 Getting Started
+Clone the repo: git clone [https://github.com/Andrey-Sema/hier_automato.git](https://github.com/Andrey-Sema/hier_automato.git)
 
-1. Клонируй репозиторий.
+Setup environment: python -m venv .venv
 
-2. Запусти run.bat. Скрипт проверит наличие Python, создаст виртуальное окружение .venv и установит библиотеки.
+Install dependencies: pip install -r requirements.txt
 
-3. Настрой ключи. При первом запуске создастся файл .env. Вставь туда свой GEMINI_API_KEY.
-
-4. Подготовь данные. Закинь фото бланков в data/input/.
-
-5. Стартуй! Жми 1 в консоли и следуй инструкциям нейро-ниндзя.
-
-Безопасность и отказоустойчивость софта:
-
-Защита БД: Утилита safe_int предотвращает ошибки переполнения INTEGER в PostgreSQL.
-
-Обработка мусора: Система игнорирует валютные символы, лишние пробелы и «галлюцинации» ИИ, приводя данные к чистому виду.
-
-Логирование: Каждый шаг сохраняется в «черный ящик» в папке data/output/ для аудита.
-
-Отказоустройчивость: Через библиотеку Hypothesis проведены тесты на уязвимые места и их исправление.
-
+Configure .env: Add your GOOGLE_API_KEY.
