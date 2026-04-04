@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime
-from pydantic import BaseModel, Field, field_validator, ValidationError
+from pydantic import BaseModel, Field, field_validator, ValidationError, ConfigDict
 
 logger = logging.getLogger(__name__)
 
@@ -19,12 +19,18 @@ class Customer(BaseModel):
 
 
 class Service(BaseModel):
+    # Разрешаем создавать модель и по реальному имени переменной, и по алиасу
+    model_config = ConfigDict(populate_by_name=True)
+
     name: str
     price: int
     quantity: int = Field(default=1)
-    c_down_presses: int = Field(default=0)
+
+    # Алиас позволяет Pydantic прочитать '1c_down_presses' из JSON
+    c_down_presses: int = Field(default=0, alias="1c_down_presses")
 
     @field_validator('price', 'quantity')
+    @classmethod
     def must_be_positive(cls, v):
         if v < 0:
             raise ValueError('Значение не может быть отрицательным')
@@ -48,7 +54,8 @@ def validate_and_fix_order(order_data: dict) -> dict:
 
     try:
         validated_order = OrderData(**order_data)
-        clean_data = validated_order.model_dump()
+        # by_alias=True обязательно, чтобы в итоговом словаре ключ назывался '1c_down_presses'
+        clean_data = validated_order.model_dump(by_alias=True)
     except ValidationError as e:
         logger.error("❌ Обнаружены ошибки структуры JSON. Запуск спасательной операции...")
 
@@ -66,7 +73,7 @@ def validate_and_fix_order(order_data: dict) -> dict:
             for s in order_data.get(cat, []):
                 try:
                     service = Service(**s)
-                    fixed_data[cat].append(service.model_dump())
+                    fixed_data[cat].append(service.model_dump(by_alias=True))
                 except ValidationError as se:
                     bad_name = s.get('name', 'НЕИЗВЕСТНО')
                     logger.warning(f"⚠️ Позиция '{bad_name}' вырезана: {se.errors()[0]['msg']}")
@@ -74,11 +81,12 @@ def validate_and_fix_order(order_data: dict) -> dict:
 
         try:
             fallback = OrderData(**fixed_data)
-            clean_data = fallback.model_dump()
+            clean_data = fallback.model_dump(by_alias=True)
         except Exception as final_e:
             logger.error(f"❌ Фатальная ошибка спасения: {final_e}")
-            clean_data = OrderData(deceased=Deceased(), customer=Customer()).model_dump()
+            clean_data = OrderData(deceased=Deceased(), customer=Customer()).model_dump(by_alias=True)
 
+    # Фикс даты смерти
     if not clean_data["deceased"]["death_date"]:
         today_str = datetime.now().strftime("%d.%m.%Y")
         clean_data["deceased"]["death_date"] = today_str

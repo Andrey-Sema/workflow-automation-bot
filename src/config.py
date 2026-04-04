@@ -67,22 +67,6 @@ CEMETERIES_DICT = {
     "Выгода": "Выгода", "Визирка": "Визирка", "Доброслав": "Доброслав"
 }
 
-# --- БИЗНЕС-ТАРИФЫ ---
-PRICES = {
-    "extra_point": 400,
-    "transport_base": 1000,
-    "snos_base": 1300,
-    "snos_escort_base": 2000
-}
-
-PERSONNEL_TARIFFS = {
-    5200: ("снос", 4),
-    7800: ("снос", 6),
-    10400: ("снос", 8),
-    8000: ("снос-ескорт", 4),
-    12000: ("снос-ескорт", 6),
-    16000: ("снос-ескорт", 8)
-}
 
 SERVICES_JSON = json.dumps(SERVICES_LIST, ensure_ascii=False)
 CEMETERIES_JSON = json.dumps(CEMETERIES_DICT, ensure_ascii=False)

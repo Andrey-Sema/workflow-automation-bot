@@ -2,8 +2,6 @@ import re
 import json
 import logging
 from typing import Any, Dict, List, Optional, Union
-from pathlib import Path
-from datetime import datetime
 import math
 
 logger = logging.getLogger(__name__)
@@ -12,8 +10,8 @@ logger = logging.getLogger(__name__)
 MAX_PG_INT = 2147483647
 MIN_PG_INT = -2147483648
 
-# Символы-маркеры списка для удаления
-LIST_MARKERS = r'^[\s\d]*[-\*•·]\s*'
+# Исправлено: добавлена точка \. в регулярку, чтобы удалять нумерацию "1. "
+LIST_MARKERS = r'^[\s\d]*[-\*•·\.]\s*'
 
 
 # ==================== ОЧИСТКА JSON ====================
@@ -76,50 +74,27 @@ def safe_parse_json(text: Any, expected_type: str = 'object') -> Optional[Union[
 # ==================== РАБОТА С ЧИСЛАМИ ====================
 
 def parse_number_string(value: str) -> Optional[float]:
-    """
-    Парсит строку с числом, учитывая разные форматы.
-
-    Примеры:
-        "3,200.50" → 3200.5
-        "1 500 грн" → 1500.0
-        "10.5 $" → 10.5
-    """
     if not isinstance(value, str):
         return None
 
-    # Убираем пробелы и символы валют
-    cleaned = re.sub(r'[₴₽$€]|\b(грн|руб|usd|eur)\b', '', value, flags=re.I)
-    cleaned = cleaned.strip()
+    # Исправлено: агрессивная чистка. Убираем вообще ВСЁ, кроме цифр, минуса, точки и запятой.
+    # Это решает проблему со словами типа "ціна 500"
+    cleaned = re.sub(r'[^\d.,\-]', '', value)
 
-    # Если строка пустая, выходим
-    if not cleaned:
+    if not cleaned or cleaned == '-':
         return None
 
-    # Заменяем пробелы между цифрами
-    cleaned = re.sub(r'(?<=\d)\s+(?=\d)', '', cleaned)
-
-    # Определяем формат числа
     if ',' in cleaned and '.' in cleaned:
-        # Формат типа "3,200.50" - запятая как разделитель тысяч
         if cleaned.index(',') < cleaned.index('.'):
-            # Убираем запятые (разделители тысяч)
             cleaned = cleaned.replace(',', '')
         else:
-            # Европейский формат: "3.200,50" - точка как разделитель тысяч
             cleaned = cleaned.replace('.', '').replace(',', '.')
     elif ',' in cleaned:
-        # Только запятая - может быть разделителем тысяч или десятичным
-        # Проверяем, есть ли после запятой ровно 2 цифры (обычно копейки)
         parts = cleaned.split(',')
         if len(parts) == 2 and len(parts[1]) in (1, 2) and parts[1].isdigit():
-            # Скорее всего десятичная запятая
             cleaned = cleaned.replace(',', '.')
         else:
-            # Скорее всего разделитель тысяч
             cleaned = cleaned.replace(',', '')
-
-    # Убираем все оставшиеся пробелы
-    cleaned = re.sub(r'\s+', '', cleaned)
 
     try:
         return float(cleaned)
