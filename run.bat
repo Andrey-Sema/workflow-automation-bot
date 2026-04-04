@@ -4,71 +4,70 @@ chcp 65001 >nul
 setlocal enabledelayedexpansion
 
 echo ==========================================
-echo 🚀 Инициализация Workflow Automation Bot v2.0...
+echo 🤖 Workflow Automation Bot v2.0 | Startup
 echo ==========================================
 
-:: 1. Проверка на дурака: не запущен ли уже бот?
+:: 1. Проверка: не запущен ли уже бот?
 tasklist /FI "IMAGENAME eq python.exe" 2>NUL | find /I "main.py" >NUL
 IF "!ERRORLEVEL!"=="0" (
-    echo ⚠️ БЛЯТЬ! Бот уже запущен! Заверши предыдущий процесс.
+    echo ⚠️ ВНИМАНИЕ! Бот уже запущен в другом окне.
+    echo Заверши старый процесс, прежде чем запускать новый.
     pause
     exit /b 1
 )
 
-:: 2. Проверка наличия Python
+:: 2. Проверка наличия Python в системе
 python --version >NUL 2>&1
 IF %ERRORLEVEL% NEQ 0 (
-    echo ❌ Python не установлен или не добавлен в PATH! Пиздуй устанавливать.
+    echo ❌ Python не найден! Установи Python 3.10+ и добавь его в PATH.
     pause
     exit /b 1
 )
 
-:: 3. Создаем структуру папок (чтобы код не падал при первом запуске на новом компе)
-IF NOT EXIST "data\input" mkdir "data\input"
-IF NOT EXIST "data\output" mkdir "data\output"
-IF NOT EXIST "data\processed" mkdir "data\processed"
-IF NOT EXIST "data\templates" mkdir "data\templates"
+:: 3. Создаем структуру папок
+if not exist "data\input" mkdir "data\input"
+if not exist "data\output" mkdir "data\output"
+if not exist "data\processed" mkdir "data\processed"
+if not exist "data\templates" mkdir "data\templates"
 
-:: 4. Проверка ключей (.env)
+:: 4. Проверка конфига (.env)
 IF NOT EXIST ".env" (
-    echo ⚠️ Ебать-копать, файла .env нет! Создаю шаблон...
+    echo ⚠️ Файл .env не найден! Создаю шаблон...
     echo GEMINI_API_KEY=твой_ключ_сюда > .env
-    echo ⚠️ Я создал файл .env. Открой его, вставь свой API ключ от Gemini и запусти снова!
+    echo 🔑 Я создал файл .env. Вставь туда свой API ключ и запусти снова.
     pause
     exit /b 1
 )
 
-:: 5. Поднятие окружения
+:: 5. Инициализация / Обновление окружения
 IF NOT EXIST ".venv" (
-    echo ⚠️ Окружение не найдено. Создаю с нуля, подожди...
+    echo 📦 Окружение не найдено. Создаю .venv...
     python -m venv .venv
-    IF %ERRORLEVEL% NEQ 0 (
-        echo ❌ Ошибка создания виртуального окружения!
+    if %ERRORLEVEL% NEQ 0 (
+        echo ❌ Ошибка при создании .venv!
         pause
         exit /b 1
     )
-    echo ✅ Папка .venv создана.
-
-    echo 📦 Ставлю зависимости из requirements.txt...
-    ".\.venv\Scripts\python.exe" -m pip install --upgrade pip >NUL
-    ".\.venv\Scripts\python.exe" -m pip install -r requirements.txt
-    IF %ERRORLEVEL% NEQ 0 (
-        echo ❌ Пиздец, ошибка установки зависимостей! Проверь инет или файл requirements.txt.
-        pause
-        exit /b 1
-    )
-    echo ✅ Все нужные либы установлены!
-) ELSE (
-    echo ✅ Виртуальное окружение на месте.
 )
+
+:: Всегда проверяем зависимости (pip сам поймет, если всё уже установлено)
+echo 🛠️ Проверка зависимостей из requirements.txt...
+".\.venv\Scripts\python.exe" -m pip install --upgrade pip >nul
+".\.venv\Scripts\python.exe" -m pip install -r requirements.txt --quiet
+if %ERRORLEVEL% NEQ 0 (
+    echo ❌ Ошибка при установке библиотек! Проверь интернет и requirements.txt.
+    pause
+    exit /b 1
+)
+echo ✅ Окружение готово.
+
 echo ==========================================
-echo 🤖 ЗАПУСК СИСТЕМЫ...
+echo 🚀 ЗАПУСК СИСТЕМЫ...
 echo ==========================================
 
-:: Запускаем через вызов модуля, так надежнее
+:: Запуск основного скрипта
 ".\.venv\Scripts\python.exe" main.py
 
-:: Сохраняем код ошибки, используя кавычки для безопасности
 set "EXIT_CODE=%ERRORLEVEL%"
 
 if %EXIT_CODE% NEQ 0 (
@@ -76,7 +75,7 @@ if %EXIT_CODE% NEQ 0 (
     echo ❌ Бот завершился с ошибкой (код: %EXIT_CODE%)
 ) else (
     echo.
-    echo ✅ Бот успешно завершил работу
+    echo ✅ Бот успешно завершил работу.
 )
 
 pause
