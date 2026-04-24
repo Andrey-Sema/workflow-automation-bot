@@ -6,16 +6,11 @@ import time
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Initialize environment variables before importing agents
+# Инициализируем переменные окружения (Новый SDK сам подхватит GEMINI_API_KEY)
 load_dotenv()
 API_KEY = os.getenv("GEMINI_API_KEY")
 if not API_KEY:
     raise RuntimeError("❌ GEMINI_API_KEY not found in .env!")
-
-# Configure the legacy SDK for agents that still rely on it
-import google.generativeai as genai_old
-
-genai_old.configure(api_key=API_KEY)
 
 # --- LOCAL MODULE IMPORTS ---
 from src.agent_booked_ocr import get_booked_items_via_screenshot

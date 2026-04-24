@@ -1,18 +1,15 @@
 import re
 import json
 import logging
-from typing import Any, Dict, List, Optional, Union
 import math
+from typing import Any, Dict, List, Optional, Union
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-# Константы для защиты БД
 MAX_PG_INT = 2147483647
 MIN_PG_INT = -2147483648
-
-# Исправлено: добавлена точка \. в регулярку, чтобы удалять нумерацию "1. "
 LIST_MARKERS = r'^[\s\d]*[-\*•·\.]\s*'
-
 
 # ==================== ОЧИСТКА JSON ====================
 
@@ -73,6 +70,42 @@ def safe_parse_json(text: Any, expected_type: str = 'object') -> Optional[Union[
 
 # ==================== РАБОТА С ЧИСЛАМИ ====================
 
+def fix_temporal_hallucinations(date_str: str) -> str:
+    """
+    Щит від помилок OCR: чистить крапки і фіксить рік.
+    """
+    if not date_str:
+        return ""
+
+    try:
+        date_str = date_str.strip().rstrip('.')
+        now = datetime.now()
+
+        # Строгая проверка: ровно две цифры, точка, две цифры (например, 26.03)
+        if re.match(r'^\d{2}\.\d{2}$', date_str):
+            return f"{date_str}.{now.year}"
+
+        # 2. Якщо прислали тільки день і місяць (без року), відразу додаємо поточний
+        if len(date_str) <= 5 and '.' in date_str:
+            return f"{date_str}.{now.year}"
+
+        # 3. Перевіряємо рік на адекватність
+        dt = datetime.strptime(date_str, "%d.%m.%Y")
+
+        if dt.year == now.year:
+            return date_str  # Все чітко
+
+        # 4. Новорічний виняток: зараз січень, а смерть була в грудні минулого року
+        if now.month == 1 and dt.month == 12 and dt.year == (now.year - 1):
+            return date_str
+
+        # 5. Всі інші розбіжності року — це галюцинація, форсуємо поточний рік
+        fixed_dt = dt.replace(year=now.year)
+        return fixed_dt.strftime("%d.%m.%Y")
+
+    except ValueError:
+        # Якщо дата в зовсім незрозумілому форматі, просто повертаємо почищену від крапки
+        return date_str
 def parse_number_string(value: str) -> Optional[float]:
     if not isinstance(value, str):
         return None

@@ -4,21 +4,24 @@ import os
 import mimetypes
 import json
 import io
-from pathlib import Path
-from typing import List, Dict, Union
+# Удалили неиспользуемый импорт Path (Проблема №1)
+from typing import List, Dict, Union, Any
 
 from PIL import Image, ImageOps
-
 from google import genai
 from google.genai import types
 
 from src.utils import safe_parse_json, deduplicate_services
 from src.config import VISION_MODEL_NAME
 
+# Исправляем Проблемы №2 и №3 (ссылки на None)
 try:
-    import fitz  # type: ignore
+    import fitz
+
+    HAS_FITZ = True
 except ImportError:
     fitz = None
+    HAS_FITZ = False
 
 logger = logging.getLogger(__name__)
 client = genai.Client()
@@ -30,12 +33,11 @@ TARGET_MAX_SIZE_KB = 10 * 1024
 def fix_image_orientation(img: Image.Image) -> Image.Image:
     try:
         return ImageOps.exif_transpose(img)
-    except Exception:  # Исправлено: уточнен тип исключения
+    except (AttributeError, KeyError, IndexError):  # Уточнили Exception (Проблема №5)
         return img
 
 
 def optimize_image_bytes(img: Image.Image, max_size_kb: int = TARGET_MAX_SIZE_KB) -> bytes:
-    # Исправлено: убран неиспользуемый аргумент filename
     if img.mode in ('RGBA', 'P'):
         img = img.convert('RGB')
     buffer = io.BytesIO()
@@ -56,32 +58,34 @@ def optimize_image(image_path: str, max_size_kb: int = TARGET_MAX_SIZE_KB) -> by
         return optimize_image_bytes(img, max_size_kb)
 
 
-def process_pdf(pdf_path: str) -> List[dict]:
-    if fitz is None:
+def process_pdf(pdf_path: str) -> List[Dict[str, Any]]:
+    # Используем флаг HAS_FITZ, чтобы IDE не ругалась на None (Проблемы №2, №3)
+    if not HAS_FITZ or fitz is None:
         logger.error("❌ Библиотека PyMuPDF не установлена! PDF игнорируются.")
         return []
+
     parts = []
-    pdf_document = fitz.open(pdf_path)  # type: ignore
+    # Теперь IDE видит, что мы заходим сюда только если fitz НЕ None
+    pdf_document = fitz.open(pdf_path)
     for page_num in range(len(pdf_document)):
         page = pdf_document[page_num]
-        pix = page.get_pixmap(matrix=fitz.Matrix(300 / 72, 300 / 72))  # type: ignore
+        # Используем метод через точку, так безопаснее для анализатора
+        matrix = fitz.Matrix(300 / 72, 300 / 72)
+        pix = page.get_pixmap(matrix=matrix)
 
-        # Исправлено: Pillow ждет кортеж (), а не список []
         img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
-
         optimized_data = optimize_image_bytes(img)
         parts.append({"mime_type": "image/jpeg", "data": optimized_data})
+
+    pdf_document.close()
     return parts
 
 
-def validate_extracted_data(data: Dict) -> bool:
-    if 'deceased' not in data:
-        logger.error("❌ Отсутствует обязательный блок deceased")
-        return False
-    return True
+def validate_extracted_data(data: Dict[str, Any]) -> bool:
+    return 'deceased' in data
 
 
-def prepare_input_files(file_paths: List[str]) -> List[dict]:
+def prepare_input_files(file_paths: List[str]) -> List[Dict[str, Any]]:
     image_parts = []
     for path in file_paths:
         if not os.path.exists(path):
@@ -90,8 +94,7 @@ def prepare_input_files(file_paths: List[str]) -> List[dict]:
         if mime_type == 'application/pdf':
             image_parts.extend(process_pdf(path))
         else:
-            size = os.path.getsize(path)
-            if size > MAX_IMAGE_SIZE:
+            if os.path.getsize(path) > MAX_IMAGE_SIZE:
                 continue
             try:
                 optimized_data = optimize_image(path)
@@ -105,7 +108,7 @@ def prepare_input_files(file_paths: List[str]) -> List[dict]:
 
 
 def extract_raw_data(file_paths: List[str], retries: int = 3) -> str:
-    logger.info("👀 АГЕНТ 1: Оцифровка бланка (Активирован Thinking-режим)...")
+    logger.info("👀 АГЕНТ 1: Оцифровка бланка...")
     start_time = time.time()
 
     image_parts = prepare_input_files(file_paths)
@@ -113,48 +116,13 @@ def extract_raw_data(file_paths: List[str], retries: int = 3) -> str:
         return "{}"
 
     prompt = """
-        Ты — AI-оцифровщик ритуальных бланков. Твоя цель — извлечь данные СТРОГО как они написаны.
-
-        🚨 ПРАВИЛО МАТЕМАТИКИ:
-        В бланке часто указано количество человек (например, 4) и общая сумма (например, 6400).
-        НИКОГДА не умножай цену на количество самостоятельно! 
-        Если в колонке 'Сума' стоит число — это финальная стоимость всей услуги.
-        Записывай её в 'price', а в 'quantity' всегда ставь 1 для услуг 'Закопування' и 'снос', чтобы избежать двойного умножения в будущем.
-
-        СТРУКТУРА JSON:
-        {
-          "deceased": {"fio": "", "birth_date": "", "death_date": "", "burial_date": "", "cemetery": ""},
-          "customer": {"fio": "", "phone": ""},
-          "services": [{"name": "", "price": 0, "quantity": 1}],
-          "transport": [{"name": "", "price": 0, "quantity": 1}],
-          "goods": [{"name": "", "price": 0, "quantity": 1}],
-          "handwritten_total": 0
-        }
-
-        ПРАВИЛА:
-        1. Для всех услуг по умолчанию 'quantity' = 1, если это не товары (платки, свечи).
-        2.ВАЖНО: Если в строке написано 'Послуги персоналу 4 (чел) --- 8000', ты пишешь quantity: 4, price: 8000. 
-    Никакого деления или умножения на этом этапе! Цена может меняться и количество но логика остается та же.
-        3. `handwritten_total` — это число из самого низа бланка.
-        
-        🚨 ПРАВИЛО РАЗДЕЛЕНИЯ (ВАЖНО):
-    Если в колонке 'Сума' ты видишь запись вида '6400 + 1400' или '6400' с припиской '+1400' ниже:
-    1. Первое число (6400) — это цена услуги 'Закопування'. Она идет в блок `services`.
-    2. Второе число (1400) — это цена товара 'Рушник для опускання'. Она ОБЯЗАТЕЛЬНО идет в блок `goods`
-    
-    🚨 ЛОГИКА ДЛЯ СКЛАДА:
-    Все физические предметы (Труна, Хрест, Вінок, Рушник, Хусточки) должны попадать СТРОГО в блок `goods`. 
-    Даже если агент написал их в разделе услуг — переноси их в `goods`.
+    Ты — AI-оцифровщик ритуальных бланков. Твоя цель — извлечь данные СТРОГО как они написаны.
+    🚨 ПРАВИЛО МАТЕМАТИКИ: Используй колонку 'Сума' как итоговую цену "price".
     """
 
-
-    # Исправлено: Явно указываем IDE, что в списке могут быть и строки, и объекты Part
     contents: List[Union[str, types.Part]] = [prompt]
-
     for part in image_parts:
-        contents.append(
-            types.Part.from_bytes(data=part["data"], mime_type=part["mime_type"])
-        )
+        contents.append(types.Part.from_bytes(data=part["data"], mime_type=part["mime_type"]))
 
     for attempt in range(retries):
         try:
@@ -162,16 +130,14 @@ def extract_raw_data(file_paths: List[str], retries: int = 3) -> str:
                 model=VISION_MODEL_NAME,
                 contents=contents,
                 config=types.GenerateContentConfig(
-                    temperature=0.5,
-                    # Исправлено: Затыкаем IDE, SDK нормально парсит стрингу "high"
-                    thinking_config=types.ThinkingConfig(thinking_level="high")  # type: ignore
+                    temperature=0.2,
+                    thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.HIGH)
                 )
             )
 
             data = safe_parse_json(response.text, expected_type='object')
-
             if not data or not isinstance(data, dict):
-                raise ValueError("Ответ не словарь или пуст")
+                raise ValueError("Ответ пуст или не является словарем")
 
             if 'services' in data:
                 data['services'] = deduplicate_services(data['services'])
@@ -180,12 +146,11 @@ def extract_raw_data(file_paths: List[str], retries: int = 3) -> str:
                 raise ValueError("Невалидная структура данных")
 
             elapsed = time.time() - start_time
-            logger.info(f"🧠 АГЕНТ 1 подумал и выдал результат за {elapsed:.2f} сек.")
-
+            logger.info(f"🧠 АГЕНТ 1 отработал за {elapsed:.2f} сек.")
             return json.dumps(data, ensure_ascii=False)
 
         except Exception as e:
-            logger.warning(f"⚠️ Ошибка парсинга (попытка {attempt + 1}): {e}")
+            logger.warning(f"⚠️ Попытка {attempt + 1} провалена: {e}")
             time.sleep(2 ** attempt)
 
     return "{}"

@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime
 from pydantic import BaseModel, Field, field_validator, ValidationError, ConfigDict
+from src.utils import fix_temporal_hallucinations
 
 logger = logging.getLogger(__name__)
 
@@ -12,6 +13,11 @@ class Deceased(BaseModel):
     burial_date: str = Field(default="")
     cemetery: str = Field(default="")
 
+    # Магія Pydantic: автоматично пропускаємо дати через наш щит
+    @field_validator('death_date', 'burial_date')
+    def clean_date_format(cls, v: str) -> str:
+        return fix_temporal_hallucinations(v)
+
 
 class Customer(BaseModel):
     fio: str = Field(default="")
@@ -19,18 +25,17 @@ class Customer(BaseModel):
 
 
 class Service(BaseModel):
-    # Разрешаем создавать модель и по реальному имени переменной, и по алиасу
     model_config = ConfigDict(populate_by_name=True)
 
     name: str
     price: int
     quantity: int = Field(default=1)
+    unit_price_for_1c: int = Field(default=0)
 
-    # Алиас позволяет Pydantic прочитать '1c_down_presses' из JSON
+    search_key: str = Field(default="", alias="1c_search_key")
     c_down_presses: int = Field(default=0, alias="1c_down_presses")
 
     @field_validator('price', 'quantity')
-    @classmethod
     def must_be_positive(cls, v):
         if v < 0:
             raise ValueError('Значение не может быть отрицательным')
@@ -49,54 +54,45 @@ class OrderData(BaseModel):
 
 
 def validate_and_fix_order(order_data: dict) -> dict:
-    logger.info("🛡️ Запуск Pydantic-валидации и контроля математики...")
-    clean_data = None
+    logger.info("🛡️ Запуск Pydantic-валидации...")
 
     try:
         validated_order = OrderData(**order_data)
-        # by_alias=True обязательно, чтобы в итоговом словаре ключ назывался '1c_down_presses'
         clean_data = validated_order.model_dump(by_alias=True)
     except ValidationError as e:
-        logger.error("❌ Обнаружены ошибки структуры JSON. Запуск спасательной операции...")
+        logger.error(f"❌ Ошибка структуры JSON: {e}")
 
         fixed_data = {
             'deceased': order_data.get('deceased', {}),
             'customer': order_data.get('customer', {}),
-            'services': [],
-            'goods': [],
-            'transport': [],
+            'services': [], 'goods': [], 'transport': [],
             'warnings': order_data.get('warnings', []),
             'handwritten_total': order_data.get('handwritten_total', 0)
         }
 
+        # Спасаем Deceased, чтобы применился fix_temporal_hallucinations
+        try:
+            fixed_data['deceased'] = Deceased(**fixed_data['deceased']).model_dump()
+        except (ValidationError, TypeError):
+            pass
+
         for cat in ['services', 'goods', 'transport']:
             for s in order_data.get(cat, []):
                 try:
-                    service = Service(**s)
-                    fixed_data[cat].append(service.model_dump(by_alias=True))
-                except ValidationError as se:
-                    bad_name = s.get('name', 'НЕИЗВЕСТНО')
-                    logger.warning(f"⚠️ Позиция '{bad_name}' вырезана: {se.errors()[0]['msg']}")
-                    fixed_data['warnings'].append(f"Удалена некорректная позиция: {bad_name}")
+                    fixed_data[cat].append(Service(**s).model_dump(by_alias=True))
+                except (ValidationError, TypeError):
+                    continue
 
-        try:
-            fallback = OrderData(**fixed_data)
-            clean_data = fallback.model_dump(by_alias=True)
-        except Exception as final_e:
-            logger.error(f"❌ Фатальная ошибка спасения: {final_e}")
-            clean_data = OrderData(deceased=Deceased(), customer=Customer()).model_dump(by_alias=True)
+        clean_data = OrderData(**fixed_data).model_dump(by_alias=True)
 
-    # Фикс даты смерти
+    # Фикс даты смерти по умолчанию
     if not clean_data["deceased"]["death_date"]:
-        today_str = datetime.now().strftime("%d.%m.%Y")
-        clean_data["deceased"]["death_date"] = today_str
-        logger.warning(f"⚠️ Дата смерти пустая! Подставил сегодняшнюю: {today_str}")
+        clean_data["deceased"]["death_date"] = datetime.now().strftime("%d.%m.%Y")
 
-    # Пересчитываем математику по всем трем массивам
+    # --- ФИНАЛЬНАЯ МАТЕМАТИКА ---
     real_total = 0
     for cat in ['services', 'goods', 'transport']:
-        real_total += sum(item["price"] * item["quantity"] for item in clean_data.get(cat, []))
+        real_total += sum(item.get("price", 0) for item in clean_data.get(cat, []))
 
     clean_data["calculated_total"] = real_total
-
     return clean_data

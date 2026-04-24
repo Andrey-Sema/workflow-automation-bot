@@ -5,13 +5,16 @@ import time
 from typing import List, Dict, Any
 from pathlib import Path
 from datetime import datetime
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 from src.config import BOOKED_MODEL_NAME
 from src.utils import safe_int, clean_service_name, safe_parse_json
 
 logger = logging.getLogger(__name__)
-BOOKED_MODEL = genai.GenerativeModel(BOOKED_MODEL_NAME)
+
+# Инициализация нового клиента (ключ подтягивается из среды автоматически)
+client = genai.Client()
 DEBUG_DIR = Path("debug_screenshots")
 
 
@@ -62,10 +65,8 @@ def get_booked_items_via_screenshot() -> List[Dict[str, Any]]:
         DEBUG_DIR.mkdir(exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-        # Сохраняем для логов с нормальным сжатием
         full_screen_img.save(DEBUG_DIR / f"screenshot_{timestamp}.jpg", format='JPEG', quality=85)
 
-        # Оптимизируем отправку: 85% хватает с головой для OCR экрана
         img_byte_arr = io.BytesIO()
         full_screen_img.save(img_byte_arr, format='JPEG', quality=85, optimize=True)
         optimized_bytes = img_byte_arr.getvalue()
@@ -77,9 +78,17 @@ def get_booked_items_via_screenshot() -> List[Dict[str, Any]]:
         Найди таблицу и извлеки данные строго из колонок: "Номенклатура", "Количество", "Цена", "Сумма".
         Верни СТРОГО JSON-массив [...]. Никакого текста до или после.
         """
-        response = BOOKED_MODEL.generate_content([prompt, {"mime_type": "image/jpeg", "data": optimized_bytes}])
 
-        # Парсим с expected_type='array'
+        # Полностью новый синтаксис запроса Google AI
+        response = client.models.generate_content(
+            model=BOOKED_MODEL_NAME,
+            contents=[
+                prompt,
+                types.Part.from_bytes(data=optimized_bytes, mime_type="image/jpeg")
+            ],
+            config=types.GenerateContentConfig(temperature=0.0)
+        )
+
         raw_items = safe_parse_json(response.text, expected_type='array')
 
         if not raw_items or not isinstance(raw_items, list):

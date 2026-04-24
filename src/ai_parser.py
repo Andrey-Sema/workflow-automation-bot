@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 # Добавили booked_in_1c
 def parse_images_with_gemini(image_paths: list, num_addresses: int, booked_in_1c: list) -> tuple[str, dict]:
-    logger.info("🔄 Запускаю конвейер Nier:Automato...")
+    logger.info("🔄 Запускаю конвейер Workflow Automation Bot...")
 
     raw_json_str = extract_raw_data(image_paths)
     if not raw_json_str or raw_json_str == "{}":
