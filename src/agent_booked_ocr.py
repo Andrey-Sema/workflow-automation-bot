@@ -7,14 +7,18 @@ from pathlib import Path
 from datetime import datetime
 from google import genai
 from google.genai import types
+from dotenv import load_dotenv
+import os
 
 from src.config import BOOKED_MODEL_NAME
 from src.utils import safe_int, clean_service_name, safe_parse_json
 
+load_dotenv()
+
 logger = logging.getLogger(__name__)
 
-# Инициализация нового клиента (ключ подтягивается из среды автоматически)
-client = genai.Client()
+# Явно передаем ключ из переменной GEMINI_API_KEY
+client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 DEBUG_DIR = Path("debug_screenshots")
 
 

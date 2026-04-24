@@ -1,3 +1,4 @@
+import os
 import json
 import time
 import logging
@@ -5,17 +6,22 @@ from typing import Dict, List, Any
 from pathlib import Path
 from functools import lru_cache
 from difflib import get_close_matches
+from dotenv import load_dotenv # Добавили
 
 from google import genai
 from google.genai import types
 
-from src.config import SERVICES_JSON, CEMETERIES_JSON, TEXT_MODEL_NAME
 from src.utils import safe_parse_json
+
+# Загружаем переменные, чтобы клиент их увидел
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-# Инициализация нового клиента
-client = genai.Client()
+# Явно передаем ключ из переменной GEMINI_API_KEY
+client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+
+# ... остальной код без изменений
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 CATALOG_PATH = BASE_DIR / "data" / "catalog.json"

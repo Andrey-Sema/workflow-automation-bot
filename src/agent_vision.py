@@ -4,27 +4,31 @@ import os
 import mimetypes
 import json
 import io
-# Удалили неиспользуемый импорт Path (Проблема №1)
 from typing import List, Dict, Union, Any
 
 from PIL import Image, ImageOps
 from google import genai
 from google.genai import types
+from dotenv import load_dotenv
 
 from src.utils import safe_parse_json, deduplicate_services
 from src.config import VISION_MODEL_NAME
 
-# Исправляем Проблемы №2 и №3 (ссылки на None)
+# 1. Сначала загружаем переменные окружения
+load_dotenv()
+
+# 2. Потом создаем клиента, явно передавая ключ
+client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+
+# Исправляем ссылки на None для IDE
 try:
     import fitz
-
     HAS_FITZ = True
 except ImportError:
     fitz = None
     HAS_FITZ = False
 
 logger = logging.getLogger(__name__)
-client = genai.Client()
 
 MAX_IMAGE_SIZE = 20 * 1024 * 1024
 TARGET_MAX_SIZE_KB = 10 * 1024
@@ -33,7 +37,7 @@ TARGET_MAX_SIZE_KB = 10 * 1024
 def fix_image_orientation(img: Image.Image) -> Image.Image:
     try:
         return ImageOps.exif_transpose(img)
-    except (AttributeError, KeyError, IndexError):  # Уточнили Exception (Проблема №5)
+    except (AttributeError, KeyError, IndexError):
         return img
 
 
@@ -59,17 +63,14 @@ def optimize_image(image_path: str, max_size_kb: int = TARGET_MAX_SIZE_KB) -> by
 
 
 def process_pdf(pdf_path: str) -> List[Dict[str, Any]]:
-    # Используем флаг HAS_FITZ, чтобы IDE не ругалась на None (Проблемы №2, №3)
     if not HAS_FITZ or fitz is None:
         logger.error("❌ Библиотека PyMuPDF не установлена! PDF игнорируются.")
         return []
 
     parts = []
-    # Теперь IDE видит, что мы заходим сюда только если fitz НЕ None
     pdf_document = fitz.open(pdf_path)
     for page_num in range(len(pdf_document)):
         page = pdf_document[page_num]
-        # Используем метод через точку, так безопаснее для анализатора
         matrix = fitz.Matrix(300 / 72, 300 / 72)
         pix = page.get_pixmap(matrix=matrix)
 
@@ -108,16 +109,32 @@ def prepare_input_files(file_paths: List[str]) -> List[Dict[str, Any]]:
 
 
 def extract_raw_data(file_paths: List[str], retries: int = 3) -> str:
-    logger.info("👀 АГЕНТ 1: Оцифровка бланка...")
+    logger.info("👀 АГЕНТ 1: Оцифровка бланка (Thinking Mode: HIGH)...")
     start_time = time.time()
 
     image_parts = prepare_input_files(file_paths)
     if not image_parts:
         return "{}"
 
+    # Восстановил важные инструкции для ИИ, чтобы он не косячил с математикой и складом
     prompt = """
     Ты — AI-оцифровщик ритуальных бланков. Твоя цель — извлечь данные СТРОГО как они написаны.
-    🚨 ПРАВИЛО МАТЕМАТИКИ: Используй колонку 'Сума' как итоговую цену "price".
+
+    🚨 ПРАВИЛО МАТЕМАТИКИ:
+    Используй колонку 'Сума' как итоговую цену "price". Не умножай и не дели ничего сам!
+
+    🚨 СКЛАДСКОЙ УЧЕТ:
+    Все физические предметы (Труна, Хрест, Вінок, Рушник, Хусточки, Свічки) ОБЯЗАТЕЛЬНО переноси в блок "goods", даже если они вписаны в услуги.
+
+    СТРУКТУРА JSON:
+    {
+      "deceased": {"fio": "", "birth_date": "", "death_date": "", "burial_date": "", "cemetery": ""},
+      "customer": {"fio": "", "phone": ""},
+      "services": [{"name": "", "price": 0, "quantity": 1}],
+      "transport": [{"name": "", "price": 0, "quantity": 1}],
+      "goods": [{"name": "", "price": 0, "quantity": 1}],
+      "handwritten_total": 0
+    }
     """
 
     contents: List[Union[str, types.Part]] = [prompt]
@@ -143,7 +160,7 @@ def extract_raw_data(file_paths: List[str], retries: int = 3) -> str:
                 data['services'] = deduplicate_services(data['services'])
 
             if not validate_extracted_data(data):
-                raise ValueError("Невалидная структура данных")
+                raise ValueError("Невалидная структура данных (нет блока deceased)")
 
             elapsed = time.time() - start_time
             logger.info(f"🧠 АГЕНТ 1 отработал за {elapsed:.2f} сек.")
