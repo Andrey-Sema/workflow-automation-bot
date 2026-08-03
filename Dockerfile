@@ -58,7 +58,16 @@ COPY docker/entrypoint.py /entrypoint.py
 
 # Fixed UID/GID (not auto-assigned) so the host-side ./data bind mount can
 # be chowned to match ahead of time — see README "First run" section.
-RUN groupadd --gid 1000 automation \
+#
+# ubuntu:24.04 ships a default "ubuntu" user/group already sitting at
+# uid/gid 1000 (added upstream for cloud-init). Without removing it first,
+# `groupadd --gid 1000` collides with it and fails with exit code 4 ("GID
+# not unique") - confirmed by hitting exactly that error building this
+# image. `|| true` on the removal so this stays a no-op if a future base
+# image drops that default user.
+RUN (userdel -r ubuntu 2>/dev/null || true) \
+    && (groupdel ubuntu 2>/dev/null || true) \
+    && groupadd --gid 1000 automation \
     && useradd --uid 1000 --gid automation --create-home --shell /usr/sbin/nologin automation \
     && mkdir -p /app/data \
     && chown -R automation:automation /app
