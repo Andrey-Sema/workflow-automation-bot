@@ -14,6 +14,7 @@ import asyncio
 import logging
 import shutil
 import uuid
+from collections import defaultdict
 from pathlib import Path
 
 from aiogram import F, Router
@@ -35,6 +36,20 @@ from src.telegram_bot.states import OrderFlow
 logger = logging.getLogger(__name__)
 router = Router(name="orders")
 
+# aiogram dispatches updates from the same chat as separate concurrent
+# tasks (e.g. Telegram delivers a multi-photo "album" as several updates in
+# quick succession) — without per-chat locking, two receive_photo() calls
+# can both read the FSM's `photos` list before either writes it back,
+# silently dropping one of the photos. One lock per chat_id serializes
+# just the read-modify-write of FSM data for that chat.
+_chat_locks: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
+
+# Only one наряд can physically be typed into 1C at a time — it's a single
+# RDP screen. This serializes confirm_enter() across *all* chats so two
+# operators confirming at the same moment can't interleave keystrokes into
+# the same 1C window.
+_onec_entry_lock = asyncio.Lock()
+
 
 @router.message(Command("cancel"))
 async def cmd_cancel(message: Message, state: FSMContext) -> None:
@@ -49,16 +64,21 @@ async def photo_while_confirming(message: Message) -> None:
 
 @router.message(F.photo | F.document)
 async def receive_photo(message: Message, state: FSMContext, settings: Settings) -> None:
-    data = await state.get_data()
-    draft_id = data.get("draft_id") or uuid.uuid4().hex[:10]
-    photos = list(data.get("photos", []))
+    # Telegram delivers a multi-photo selection as several separate updates
+    # in quick succession; without this lock, two concurrent calls for the
+    # same chat can both read `photos` before either writes it back and one
+    # photo silently vanishes from the draft. See _chat_locks comment above.
+    async with _chat_locks[message.chat.id]:
+        data = await state.get_data()
+        draft_id = data.get("draft_id") or uuid.uuid4().hex[:10]
+        photos = list(data.get("photos", []))
 
-    dest_dir = settings.data_dir / "incoming" / draft_id
-    path = await download_order_photo(message.bot, message, dest_dir, settings.telegram_max_file_mb)
+        dest_dir = settings.data_dir / "incoming" / draft_id
+        path = await download_order_photo(message.bot, message, dest_dir, settings.telegram_max_file_mb)
 
-    photos.append(str(path))
-    await state.update_data(draft_id=draft_id, photos=photos)
-    await state.set_state(OrderFlow.collecting)
+        photos.append(str(path))
+        await state.update_data(draft_id=draft_id, photos=photos)
+        await state.set_state(OrderFlow.collecting)
 
     await message.answer(
         f"📸 Принято ({len(photos)} шт.). Пришли ещё фото/PDF или жми «Готово».",
@@ -75,11 +95,12 @@ async def cancel_draft(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(F.data == kb.DONE_CB)
 async def photos_done(callback: CallbackQuery, state: FSMContext) -> None:
-    data = await state.get_data()
-    if not data.get("photos"):
-        await callback.answer("Сначала пришли хотя бы одно фото.", show_alert=True)
-        return
-    await state.set_state(OrderFlow.choosing_addresses)
+    async with _chat_locks[callback.message.chat.id]:
+        data = await state.get_data()
+        if not data.get("photos"):
+            await callback.answer("Сначала пришли хотя бы одно фото.", show_alert=True)
+            return
+        await state.set_state(OrderFlow.choosing_addresses)
     await callback.message.edit_text("📍 Сколько дополнительных адресов (точек) в маршруте?")
     await callback.message.answer("Выбери количество:", reply_markup=kb.addresses_keyboard())
     await callback.answer()
@@ -88,7 +109,8 @@ async def photos_done(callback: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(F.data.startswith(kb.ADDRESSES_CB_PREFIX))
 async def addresses_chosen(callback: CallbackQuery, state: FSMContext) -> None:
     num_addresses = int(callback.data.removeprefix(kb.ADDRESSES_CB_PREFIX))
-    await state.update_data(num_addresses=num_addresses)
+    async with _chat_locks[callback.message.chat.id]:
+        await state.update_data(num_addresses=num_addresses)
     await callback.message.edit_text(
         f"📍 Адресов: {num_addresses}\n\n🕵️ Сканировать открытый наряд в 1С на дубликаты услуг?"
     )
@@ -137,25 +159,41 @@ async def confirm_enter(
         await callback.answer("Этот наряд уже обработан или не найден.", show_alert=True)
         return
 
-    await callback.message.edit_text(f"⚡️ Вношу наряд #{order_id} в 1С...")
     await callback.answer()
-
-    bot_1c = OneCOrderEntryBot(settings=settings)
-    try:
-        entered = await asyncio.to_thread(bot_1c.enter_order, record.order_data)
-    except WorkflowError as e:
-        await order_store.set_status(order_id, FAILED, error_message=str(e))
-        await callback.message.answer(
-            f"{e.user_message}\n\n⚠️ Наряд #{order_id} внесён частично или не внесён — "
-            "файлы НЕ перемещены, проверь окно 1С вручную перед повтором."
+    if _onec_entry_lock.locked():
+        await callback.message.edit_text(
+            f"⏳ Наряд #{order_id} в очереди — сейчас в 1С вносится другой наряд, жди..."
         )
-        await state.clear()
-        return
 
-    _move_photos_to_processed(record.photo_paths, settings)
-    await order_store.set_status(order_id, ENTERED)
-    await callback.message.answer(f"✅ Наряд #{order_id} внесён в 1С ({len(entered)} позиций).")
-    await state.clear()
+    # Serializes against every other confirm_enter() call, not just ones
+    # for this order: only one наряд can physically be typed into the 1C
+    # window at a time. Re-check status *after* acquiring the lock too — a
+    # double-tap (or two operators confirming the same order) could have
+    # both passed the fast check above before either actually committed.
+    async with _onec_entry_lock:
+        record = await order_store.get(order_id)
+        if not record or record.status != PENDING:
+            await callback.message.edit_text("Этот наряд уже обработан (обрабатывался параллельно).")
+            return
+
+        await callback.message.edit_text(f"⚡️ Вношу наряд #{order_id} в 1С...")
+
+        bot_1c = OneCOrderEntryBot(settings=settings)
+        try:
+            entered = await asyncio.to_thread(bot_1c.enter_order, record.order_data)
+        except WorkflowError as e:
+            await order_store.set_status(order_id, FAILED, error_message=str(e))
+            await callback.message.answer(
+                f"{e.user_message}\n\n⚠️ Наряд #{order_id} внесён частично или не внесён — "
+                "файлы НЕ перемещены, проверь окно 1С вручную перед повтором."
+            )
+            await state.clear()
+            return
+
+        _move_photos_to_processed(record.photo_paths, settings)
+        await order_store.set_status(order_id, ENTERED)
+        await callback.message.answer(f"✅ Наряд #{order_id} внесён в 1С ({len(entered)} позиций).")
+        await state.clear()
 
 
 @router.callback_query(F.data.startswith(kb.CONFIRM_CANCEL_CB))

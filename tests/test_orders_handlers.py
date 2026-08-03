@@ -91,6 +91,31 @@ async def test_receive_photo_appends_to_existing_draft(fsm, order_settings):
     assert data["draft_id"] == "abc123"
 
 
+async def test_receive_photo_concurrent_uploads_dont_drop_each_other(fsm, order_settings):
+    """Regression: Telegram delivers a multi-photo selection as several
+    updates in quick succession, which aiogram can dispatch concurrently.
+    Without the per-chat lock in receive_photo(), two overlapping calls
+    both read the (empty) photos list before either writes it back, and
+    one photo silently disappears from the draft."""
+    import asyncio
+
+    async def slow_download(bot, message, dest_dir, max_mb):
+        await asyncio.sleep(0.05)
+        return Path(f"/tmp/{message.tag}.jpg")
+
+    message_a = fake_message(photo=None, document=None, tag="a")
+    message_b = fake_message(photo=None, document=None, tag="b")
+
+    with patch("src.telegram_bot.handlers.orders.download_order_photo", new=slow_download):
+        await asyncio.gather(
+            orders.receive_photo(message_a, fsm, order_settings),
+            orders.receive_photo(message_b, fsm, order_settings),
+        )
+
+    data = await fsm.get_data()
+    assert sorted(data["photos"]) == ["/tmp/a.jpg", "/tmp/b.jpg"]
+
+
 async def test_cancel_draft_clears_state(fsm):
     await fsm.set_state(OrderFlow.collecting)
     callback = fake_callback(kb.CANCEL_DRAFT_CB)
@@ -165,6 +190,43 @@ async def test_confirm_enter_failure_keeps_files_and_marks_failed(fsm, order_set
     record = await order_store.get("ORD1")
     assert record.status == FAILED
     assert photo.exists()  # left in place for manual review
+
+
+async def test_confirm_enter_serializes_concurrent_1c_entry(fsm, order_settings, order_store, tmp_path):
+    """Regression: two orders confirmed at nearly the same moment must
+    never type into 1C concurrently — it's one physical RDP screen."""
+    import asyncio
+
+    order_data = {"deceased": {"fio": "Тест"}, "services": [], "goods": [], "transport": []}
+    summary = build_order_summary(order_data)
+    await order_store.create_pending("ORD1", 42, [], 0, order_data, summary)
+    await order_store.create_pending("ORD2", 42, [], 0, order_data, summary)
+
+    concurrent_count = 0
+    max_concurrent = 0
+
+    def blocking_enter_order(order_data):
+        nonlocal concurrent_count, max_concurrent
+        concurrent_count += 1
+        max_concurrent = max(max_concurrent, concurrent_count)
+        import time
+        time.sleep(0.05)
+        concurrent_count -= 1
+        return []
+
+    callback1 = fake_callback(f"{kb.CONFIRM_ENTER_CB}ORD1")
+    callback2 = fake_callback(f"{kb.CONFIRM_ENTER_CB}ORD2")
+
+    with patch("src.telegram_bot.handlers.orders.OneCOrderEntryBot") as mock_bot_cls:
+        mock_bot_cls.return_value.enter_order.side_effect = blocking_enter_order
+        await asyncio.gather(
+            orders.confirm_enter(callback1, fsm, order_settings, order_store),
+            orders.confirm_enter(callback2, fsm, order_settings, order_store),
+        )
+
+    assert max_concurrent == 1
+    assert (await order_store.get("ORD1")).status == ENTERED
+    assert (await order_store.get("ORD2")).status == ENTERED
 
 
 async def test_confirm_cancel_marks_cancelled(fsm, order_store):

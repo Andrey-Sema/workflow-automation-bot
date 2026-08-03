@@ -64,6 +64,12 @@ class OrderStore:
     async def init(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         async with aiosqlite.connect(self.db_path) as db:
+            # WAL persists as a property of the DB file itself, so setting
+            # it once here is enough for every later per-call connection
+            # (see the rest of this class) to benefit: readers no longer
+            # block writers, and concurrent operator actions (several
+            # orders in flight at once) don't risk "database is locked".
+            await db.execute("PRAGMA journal_mode=WAL")
             await db.executescript(_SCHEMA)
             await db.commit()
 
