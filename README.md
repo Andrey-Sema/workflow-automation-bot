@@ -19,8 +19,9 @@ only works against a real, rendered RDP session:
 │  Xvfb (virtual display) ← xfreerdp3 renders the remote Windows/1C │
 │         │                  desktop onto it, auto-reconnects        │
 │         │                                                          │
-│         ├── src/win_1c_bot.py (unchanged) — pyautogui screen-      │
-│         │   template matching + clicks, driving the Xvfb display   │
+│         ├── src/win_1c_bot.py — pyautogui screen-template          │
+│         │   matching + clicks, driving the Xvfb display exactly    │
+│         │   as it would a real local screen                        │
 │         │   exactly as it would a real local screen                │
 │         │                                                          │
 │         └── src/telegram_bot/ — aiogram bot: file intake, order    │
@@ -38,9 +39,13 @@ only works against a real, rendered RDP session:
 **Why one container, not split services:** the only reliable way to enter
 data into 1C is to drive the same pixels a human would see, so the RDP
 client has to render into a display the automation code can see too. Xvfb
-provides that display inside the container; the existing `pyautogui`-based
-`src/win_1c_bot.py` is untouched — it just now points at a virtual screen
-instead of a physical one.
+provides that display inside the container; `src/win_1c_bot.py`'s core
+technique — locate a saved template image on screen, click its center — is
+the original, proven approach, kept as-is. It's now more resilient around
+that core (retries a transient miss, distinguishes "template file missing
+from disk" from "not on screen right now", tolerates pyautogui being
+unavailable instead of crashing at import time) but drives the same pixels
+the same way, whether that's a virtual screen or a physical one.
 
 ## 🌟 Pipeline
 
@@ -184,7 +189,7 @@ monitoring stack.
 | AI             | `google-genai`, Gemini 3.6 Flash / 3.5 Flash-Lite |
 | Bot            | aiogram 3.x, aiosqlite (order/session persistence) |
 | Validation     | Pydantic v2, `pydantic-settings` |
-| Automation     | PyAutoGUI (unchanged low-level input), FreeRDP (`xfreerdp3`), Xvfb |
+| Automation     | PyAutoGUI + OpenCV (template-match confidence), FreeRDP (`xfreerdp3`), Xvfb |
 | Quality        | ruff, bandit, pytest, pytest-cov, Hypothesis (property-based testing) |
 | Monitoring     | prometheus-client, aiohttp (`/metrics`), Prometheus, Grafana |
 | Deployment     | Docker (single image: Xvfb + FreeRDP + bot), docker-compose |
@@ -204,14 +209,14 @@ src/
   order_store.py, operators_store.py         # sqlite / JSON persistence
   rdp_status.py, preflight.py                # RDP safety gate, startup checks
   circuit_breaker.py, metrics.py             # resilience + Prometheus metric defs
-  win_1c_bot.py                              # ⚠️ untouched low-level input
+  win_1c_bot.py                              # low-level 1C input (core technique unchanged)
   onec_order_entry.py                        # 1C order-entry automation (new)
   telegram_bot/                              # aiogram bot: handlers, middlewares, keyboards,
                                              #   sqlite FSM storage, /metrics server
 docker/entrypoint.py                         # Xvfb + FreeRDP supervisor + bot launcher
 monitoring/                                  # Prometheus config + Grafana provisioning/dashboard
 tools/                                       # manual calibration scripts (native OS, not in Docker)
-tests/                                       # pytest + Hypothesis, ~85% coverage on src/
+tests/                                       # pytest + Hypothesis, ~86% coverage on src/
 ```
 
 ## 🧪 Development

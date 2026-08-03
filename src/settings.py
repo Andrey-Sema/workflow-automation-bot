@@ -66,7 +66,11 @@ class Settings(BaseSettings):
 
     # --- 1C / RDP automation ---
     onec_dry_run: bool = Field(default=True, alias="ONEC_DRY_RUN")
-    onec_template_confidence: float = Field(default=0.8, alias="ONEC_TEMPLATE_CONFIDENCE")
+    # gt=0/le=1: OpenCV's template-match score is a fraction in (0, 1]; a
+    # value outside that range doesn't error inside pyautogui, it just
+    # silently never matches (0) or always matches garbage (<0) - failing
+    # fast here beats debugging a "vkladka not found" 1C error later.
+    onec_template_confidence: float = Field(default=0.8, alias="ONEC_TEMPLATE_CONFIDENCE", gt=0, le=1)
     onec_keystroke_delay: float = Field(default=0.03, alias="ONEC_KEYSTROKE_DELAY")
     onec_action_pause: float = Field(default=0.4, alias="ONEC_ACTION_PAUSE")
 

@@ -17,6 +17,13 @@ PyMuPDF==1.27.2.2
 # Xvfb display that FreeRDP renders the remote desktop onto) ---
 PyAutoGUI==0.9.54
 pyperclip==1.11.0
+# Required for PyAutoGUI/PyScreeze's `confidence=` kwarg (fuzzy template
+# matching, tolerates a few pixels of RDP rendering difference) - without
+# this, passing confidence=... raises NotImplementedError at runtime and
+# every real 1C tab switch fails. -headless: no GTK/libGL dependency, so it
+# installs cleanly on the minimal ubuntu:24.04 image without extra apt
+# packages (confirmed: its manylinux wheel vendors everything except libc).
+opencv-python-headless==4.12.0.88
 
 # --- Telegram bot ---
 aiogram==3.30.0
