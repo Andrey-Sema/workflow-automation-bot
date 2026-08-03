@@ -5,6 +5,7 @@ and that the expected routers + shared dependencies are present."""
 from src.operators_store import OperatorsStore
 from src.order_store import OrderStore
 from src.telegram_bot.bot import build_dispatcher
+from src.telegram_bot.sqlite_storage import SQLiteStorage
 
 
 def test_build_dispatcher_wiring(tmp_path):
@@ -12,8 +13,9 @@ def test_build_dispatcher_wiring(tmp_path):
     # attached to one Dispatcher, so this stays a single test (build once).
     order_store = OrderStore(tmp_path / "orders.db")
     operators_store = OperatorsStore(tmp_path / "operators.json")
+    fsm_storage = SQLiteStorage(tmp_path / "fsm.db")
 
-    dp = build_dispatcher(order_store, operators_store)
+    dp = build_dispatcher(order_store, operators_store, fsm_storage)
 
     router_names = {router.name for router in dp.sub_routers}
     assert router_names == {"orders", "admin", "common"}

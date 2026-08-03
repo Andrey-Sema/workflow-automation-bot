@@ -119,6 +119,10 @@ class Settings(BaseSettings):
         return self.data_dir / "orders.db"
 
     @property
+    def fsm_storage_path(self) -> Path:
+        return self.data_dir / "fsm_storage.db"
+
+    @property
     def log_dir(self) -> Path:
         return self.data_dir / "logs"
 

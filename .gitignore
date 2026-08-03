@@ -29,10 +29,13 @@ full_project_code.txt
 # === Данные и базы ===
 *.csv
 data/input/
+data/incoming/
 data/output/
 data/processed/
 data/logs/
 data/operators.json
+data/.health
+data/.rdp_status
 *.sqlite3
 *.db
 data/catalog.json

@@ -11,15 +11,16 @@ import time
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
-from aiogram.fsm.storage.memory import MemoryStorage
 
 from src.logging_setup import TelegramQueueHandler, setup_logging
 from src.operators_store import OperatorsStore
 from src.order_store import OrderStore
+from src.preflight import run_preflight
 from src.settings import get_settings, require_telegram_token
 from src.telegram_bot.handlers import admin, common, orders
 from src.telegram_bot.locks import onec_entry_lock
 from src.telegram_bot.middlewares import AccessControlMiddleware, CorrelationIdMiddleware, ErrorHandlingMiddleware
+from src.telegram_bot.sqlite_storage import SQLiteStorage
 
 logger = logging.getLogger(__name__)
 
@@ -71,9 +72,9 @@ async def _heartbeat_loop(path) -> None:
         await asyncio.sleep(30)
 
 
-def build_dispatcher(order_store: OrderStore, operators_store: OperatorsStore) -> Dispatcher:
+def build_dispatcher(order_store: OrderStore, operators_store: OperatorsStore, storage: SQLiteStorage) -> Dispatcher:
     settings = get_settings()
-    dp = Dispatcher(storage=MemoryStorage())
+    dp = Dispatcher(storage=storage)
 
     dp["settings"] = settings
     dp["order_store"] = order_store
@@ -105,11 +106,15 @@ async def run() -> None:
     token = require_telegram_token(settings)
     bot = Bot(token=token.get_secret_value(), default=DefaultBotProperties())
 
+    await run_preflight(settings, bot)
+
     order_store = OrderStore(settings.orders_db_path)
     await order_store.init()
     operators_store = OperatorsStore(settings.operators_path)
+    fsm_storage = SQLiteStorage(settings.fsm_storage_path)
+    await fsm_storage.init()
 
-    dp = build_dispatcher(order_store, operators_store)
+    dp = build_dispatcher(order_store, operators_store, fsm_storage)
 
     background_tasks = [asyncio.create_task(_heartbeat_loop(settings.data_dir / HEARTBEAT_PATH_NAME))]
     if telegram_handler is not None:
@@ -125,3 +130,4 @@ async def run() -> None:
         for task in background_tasks:
             task.cancel()
         await bot.session.close()
+        await fsm_storage.close()
