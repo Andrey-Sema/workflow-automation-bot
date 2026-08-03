@@ -59,6 +59,22 @@ def test_capture_booked_items_happy_path(mock_pyautogui, mock_get_client, tmp_pa
     assert (tmp_path / "debug_screenshots").exists()
 
 
+def test_prune_old_screenshots_keeps_only_newest(tmp_path):
+    from src.agent_booked_ocr import MAX_DEBUG_SCREENSHOTS, _prune_old_screenshots
+
+    for i in range(MAX_DEBUG_SCREENSHOTS + 7):
+        (tmp_path / f"screenshot_20260101_{i:06d}.jpg").write_bytes(b"x")
+    (tmp_path / "unrelated.txt").write_text("keep me")
+
+    _prune_old_screenshots(tmp_path)
+
+    remaining = sorted(tmp_path.glob("screenshot_*.jpg"))
+    assert len(remaining) == MAX_DEBUG_SCREENSHOTS
+    # the oldest (lowest timestamp) ones are the ones deleted
+    assert remaining[0].name == "screenshot_20260101_000007.jpg"
+    assert (tmp_path / "unrelated.txt").exists()
+
+
 @patch("src.agent_booked_ocr.pyautogui")
 def test_capture_booked_items_returns_empty_on_screenshot_failure(mock_pyautogui):
     mock_pyautogui.screenshot.side_effect = RuntimeError("no display")

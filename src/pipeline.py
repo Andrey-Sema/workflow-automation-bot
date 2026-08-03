@@ -20,7 +20,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from src.ai_parser import parse_images_with_gemini
-from src.errors import GeminiParsingError, ValidationFailedError
+from src.errors import GeminiParsingError, GeminiUnavailableError, ValidationFailedError
+from src.metrics import PIPELINE_DURATION, PIPELINE_RUNS
 from src.order_conflicts import OrderSummary, build_order_summary
 from src.settings import get_settings
 from src.validator import validate_and_fix_order
@@ -56,17 +57,26 @@ def run_pipeline(
     booked_names = _booked_item_names(booked_in_1c or [])
     str_paths = [str(p) for p in photo_paths]
 
-    raw_json_str, final_json_data = parse_images_with_gemini(str_paths, num_addresses, booked_names)
-    if not final_json_data:
-        raise GeminiParsingError("Пайплайн Gemini вернул пустые данные после всех попыток")
+    try:
+        raw_json_str, final_json_data = parse_images_with_gemini(str_paths, num_addresses, booked_names)
+        if not final_json_data:
+            PIPELINE_RUNS.labels(outcome="gemini_error").inc()
+            raise GeminiParsingError("Пайплайн Gemini вернул пустые данные после всех попыток")
 
-    order_data = validate_and_fix_order(final_json_data)
-    if not order_data:
-        raise ValidationFailedError("Данные не прошли Pydantic-валидацию")
+        order_data = validate_and_fix_order(final_json_data)
+        if not order_data:
+            PIPELINE_RUNS.labels(outcome="validation_error").inc()
+            raise ValidationFailedError("Данные не прошли Pydantic-валидацию")
+    except GeminiUnavailableError:
+        PIPELINE_RUNS.labels(outcome="gemini_unavailable").inc()
+        raise
+    finally:
+        PIPELINE_DURATION.observe(time.time() - start)
 
     summary = build_order_summary(order_data)
     elapsed = time.time() - start
     logger.info(f"⏱ Пайплайн отработал за {elapsed:.2f} сек.")
+    PIPELINE_RUNS.labels(outcome="success").inc()
 
     return PipelineResult(raw_json_str=raw_json_str, order_data=order_data, summary=summary, elapsed_seconds=elapsed)
 

@@ -21,3 +21,9 @@ pyperclip==1.11.0
 # --- Telegram bot ---
 aiogram==3.30.0
 aiosqlite==0.22.1
+
+# --- Metrics (Prometheus) ---
+# aiohttp is already an aiogram dependency; pinned explicitly since
+# src/telegram_bot/metrics_server.py imports it directly.
+aiohttp==3.14.3
+prometheus-client==0.26.0

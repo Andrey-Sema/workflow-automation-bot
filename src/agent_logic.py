@@ -7,7 +7,10 @@ from typing import Any
 from google.genai import types
 
 from src import config
+from src.circuit_breaker import gemini_circuit_breaker
+from src.errors import GeminiUnavailableError
 from src.gemini_client import get_client
+from src.metrics import GEMINI_CALL_DURATION, GEMINI_CALLS
 from src.utils import safe_parse_json
 
 logger = logging.getLogger(__name__)
@@ -238,6 +241,10 @@ def apply_business_rules_in_python(data: dict[str, Any], num_addresses: int, boo
 def validate_and_normalize(
     raw_json_str: str, num_addresses: int, booked_in_1c: list[str], retries: int = 3
 ) -> dict[str, Any]:
+    if gemini_circuit_breaker.is_open:
+        logger.error("🚨 Circuit breaker открыт: Gemini недавно стабильно падал, пропускаю попытки.")
+        raise GeminiUnavailableError()
+
     prompt = f"""
     You are a strict Data Engineer. Normalize item names in JSON.
     RAW DATA: {raw_json_str}
@@ -248,15 +255,23 @@ def validate_and_normalize(
     client = get_client()
     for attempt in range(retries):
         try:
+            call_start = time.time()
             response = client.models.generate_content(
                 model=TEXT_MODEL_NAME,
                 contents=prompt,
                 config=types.GenerateContentConfig(temperature=0.0, response_mime_type="application/json"),
             )
+            GEMINI_CALL_DURATION.labels(agent="logic").observe(time.time() - call_start)
             data = safe_parse_json(response.text, expected_type='object')
             if data:
+                GEMINI_CALLS.labels(agent="logic", outcome="success").inc()
+                gemini_circuit_breaker.record_success()
                 return apply_business_rules_in_python(data, num_addresses, booked_in_1c)
+            GEMINI_CALLS.labels(agent="logic", outcome="error").inc()
+            gemini_circuit_breaker.record_failure()
         except Exception as e:
+            GEMINI_CALLS.labels(agent="logic", outcome="error").inc()
+            gemini_circuit_breaker.record_failure()
             logger.warning(f"⚠️ Попытка {attempt + 1} не удалась: {e}")
             time.sleep(2)
     return {}

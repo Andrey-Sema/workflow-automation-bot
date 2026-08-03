@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from src.errors import OneCInputError, RdpConnectionError
+from src.metrics import ONEC_ENTRIES, ONEC_ENTRY_DURATION, ONEC_ITEMS_ENTERED
 from src.rdp_status import is_rdp_connected
 from src.settings import Settings, get_settings
 from src.win_1c_bot import click_tab_by_image
@@ -182,16 +183,27 @@ class OneCOrderEntryBot:
         # screen, so it's exempt: this check exists purely to protect real
         # automation.
         if not self.dry_run and not is_rdp_connected(self.settings):
+            ONEC_ENTRIES.labels(outcome="rdp_disconnected").inc()
             raise RdpConnectionError()
 
+        start = time.time()
         entered: list[str] = []
         categories: list[tuple[OrderCategory, list[dict]]] = [
             (OrderCategory.SERVICES, order_data.get("services", [])),
             (OrderCategory.GOODS, order_data.get("goods", [])),
             (OrderCategory.TRANSPORT, order_data.get("transport", [])),
         ]
-        for category, items in categories:
-            for item in items:
-                self.enter_item(category, item)
-                entered.append(item.get("name", "?"))
+        try:
+            for category, items in categories:
+                for item in items:
+                    self.enter_item(category, item)
+                    entered.append(item.get("name", "?"))
+                    ONEC_ITEMS_ENTERED.inc()
+        except Exception:
+            ONEC_ENTRIES.labels(outcome="failed").inc()
+            raise
+        else:
+            ONEC_ENTRIES.labels(outcome="success").inc()
+        finally:
+            ONEC_ENTRY_DURATION.observe(time.time() - start)
         return entered

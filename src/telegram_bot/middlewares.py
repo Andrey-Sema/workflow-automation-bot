@@ -10,7 +10,9 @@ aiogram Dispatcher/Bot.
 
 from __future__ import annotations
 
+import contextlib
 import logging
+import time
 import uuid
 from typing import Any
 
@@ -19,6 +21,7 @@ from aiogram.types import TelegramObject
 
 from src.errors import AccessDeniedError, WorkflowError
 from src.logging_setup import set_correlation_id
+from src.metrics import TELEGRAM_ACCESS
 from src.operators_store import OperatorsStore
 from src.settings import Settings
 
@@ -63,11 +66,46 @@ class AccessControlMiddleware(BaseMiddleware):
         data["is_operator"] = allowed
 
         if not allowed:
+            TELEGRAM_ACCESS.labels(result="denied").inc()
             logger.warning(f"⛔ Доступ отклонён для chat_id={chat_id}")
             if hasattr(event, "answer"):
                 await event.answer(AccessDeniedError().user_message)
             return None
 
+        TELEGRAM_ACCESS.labels(result="allowed").inc()
+        return await handler(event, data)
+
+
+class ThrottlingMiddleware(BaseMiddleware):
+    """Drops an update if it arrives less than `min_interval` seconds
+    after the previous one from the same chat — cheap protection against
+    accidental rapid-fire button mashing burning through Gemini quota or
+    queuing redundant 1C entries. Not meant to stop a determined abuser
+    (the bot is only reachable by the allowlist checked in
+    `AccessControlMiddleware`, which runs before this one, so unauthorized
+    senders never get tracked here at all).
+    """
+
+    def __init__(self, min_interval: float) -> None:
+        self.min_interval = min_interval
+        self._last_seen: dict[int, float] = {}
+
+    async def __call__(self, handler, event: TelegramObject, data: dict[str, Any]):
+        chat_id = extract_chat_id(event)
+        if chat_id is not None:
+            now = time.monotonic()
+            last = self._last_seen.get(chat_id)
+            self._last_seen[chat_id] = now
+            if last is not None and (now - last) < self.min_interval:
+                logger.debug(f"🐢 Throttled: chat_id={chat_id}")
+                # For a CallbackQuery this just clears the button's "loading"
+                # spinner with no extra chat message; a plain Message gets no
+                # reply at all rather than a nag on every fast double-tap.
+                answer = getattr(event, "answer", None)
+                if answer is not None and hasattr(event, "data"):
+                    with contextlib.suppress(Exception):
+                        await answer()
+                return None
         return await handler(event, data)
 
 

@@ -269,6 +269,58 @@ async def test_confirm_cancel_marks_cancelled(fsm, order_store):
     assert record.status == CANCELLED
 
 
+async def test_confirm_cancel_refuses_once_order_already_entered(fsm, order_settings, order_store):
+    """Regression: ✅ and ❌ sit on the same message. A stale/late tap on
+    ❌ for an order that already got typed into 1C must never flip its
+    status back to CANCELLED — a human could then re-type it manually,
+    duplicating the наряд in 1C."""
+    order_data = {"deceased": {"fio": "Тест"}, "services": [], "goods": [], "transport": []}
+    summary = build_order_summary(order_data)
+    await order_store.create_pending("ORD1", 42, [], 0, order_data, summary)
+    await order_store.set_status("ORD1", ENTERED)
+
+    callback = fake_callback(f"{kb.CONFIRM_CANCEL_CB}ORD1")
+    await orders.confirm_cancel(callback, fsm, order_store)
+
+    record = await order_store.get("ORD1")
+    assert record.status == ENTERED
+    callback.answer.assert_awaited_once_with("Этот наряд уже обработан или не найден.", show_alert=True)
+
+
+async def test_confirm_cancel_does_not_overwrite_entry_finishing_mid_race(
+    fsm, order_settings, order_store, monkeypatch
+):
+    """Narrower version of the above: cancel's *first* check sees the order
+    still PENDING (entry hasn't finalized yet) and only blocks on
+    _onec_entry_lock. The entry then finishes and sets ENTERED before
+    cancel gets the lock. The re-check inside the lock must catch this."""
+    import asyncio
+
+    lock = asyncio.Lock()
+    monkeypatch.setattr(orders, "_onec_entry_lock", lock)
+
+    order_data = {"deceased": {"fio": "Тест"}, "services": [], "goods": [], "transport": []}
+    summary = build_order_summary(order_data)
+    await order_store.create_pending("ORD1", 42, [], 0, order_data, summary)
+
+    await lock.acquire()  # stand-in for confirm_enter() already mid-typing
+    try:
+        cancel_callback = fake_callback(f"{kb.CONFIRM_CANCEL_CB}ORD1")
+        cancel_task = asyncio.create_task(orders.confirm_cancel(cancel_callback, fsm, order_store))
+        await asyncio.sleep(0.01)  # let confirm_cancel pass its fast pre-check and block on the lock
+
+        # ...meanwhile the in-flight entry finishes, exactly as confirm_enter()
+        # would right before releasing _onec_entry_lock:
+        await order_store.set_status("ORD1", ENTERED)
+    finally:
+        lock.release()
+
+    await cancel_task
+
+    record = await order_store.get("ORD1")
+    assert record.status == ENTERED
+
+
 async def test_show_log_missing_file_shows_alert(order_settings):
     callback = fake_callback(f"{kb.SHOW_LOG_CB}NOPE")
     await orders.show_log(callback, order_settings)

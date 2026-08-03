@@ -191,10 +191,33 @@ async def confirm_enter(
 @router.callback_query(F.data.startswith(kb.CONFIRM_CANCEL_CB))
 async def confirm_cancel(callback: CallbackQuery, state: FSMContext, order_store: OrderStore) -> None:
     order_id = callback.data.removeprefix(kb.CONFIRM_CANCEL_CB)
-    await order_store.set_status(order_id, CANCELLED, error_message="Отменено пользователем перед вводом в 1С")
-    await callback.message.edit_text(f"🚫 Наряд #{order_id} отменён. Файлы остались в data/incoming — не обработаны.")
+    record = await order_store.get(order_id)
+    if not record or record.status != PENDING:
+        await callback.answer("Этот наряд уже обработан или не найден.", show_alert=True)
+        return
+
     await callback.answer()
-    await state.clear()
+    if _onec_entry_lock.locked():
+        await callback.message.edit_text(
+            f"⏳ Наряд #{order_id} сейчас вносится в 1С — дожидаюсь окончания, чтобы отменить..."
+        )
+
+    # Same race confirm_enter() guards against, mirrored: ✅ and ❌ sit on the
+    # same message, so a tap on this button can land while another task is
+    # mid-way through actually typing this order into 1C. Without sharing
+    # the lock and re-checking status, a cancel here could overwrite an
+    # ENTERED record back to CANCELLED even though the physical 1C entry
+    # already happened and can't be un-typed.
+    async with _onec_entry_lock:
+        record = await order_store.get(order_id)
+        if not record or record.status != PENDING:
+            await callback.message.edit_text(f"Наряд #{order_id} уже обработан — отмена не применена.")
+            return
+        await order_store.set_status(order_id, CANCELLED, error_message="Отменено пользователем перед вводом в 1С")
+        await callback.message.edit_text(
+            f"🚫 Наряд #{order_id} отменён. Файлы остались в data/incoming — не обработаны."
+        )
+        await state.clear()
 
 
 @router.callback_query(F.data.startswith(kb.SHOW_LOG_CB))

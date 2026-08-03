@@ -9,8 +9,11 @@ from typing import Any
 from google.genai import types
 from PIL import Image, ImageOps
 
+from src.circuit_breaker import gemini_circuit_breaker
 from src.config import VISION_MODEL_NAME
+from src.errors import GeminiUnavailableError
 from src.gemini_client import get_client
+from src.metrics import GEMINI_CALL_DURATION, GEMINI_CALLS
 from src.utils import deduplicate_services, safe_parse_json
 
 try:
@@ -133,6 +136,10 @@ def extract_raw_data(file_paths: list[str], retries: int = 3) -> str:
     logger.info("👀 АГЕНТ 1: Оцифровка бланка (Thinking Mode: HIGH)...")
     start_time = time.time()
 
+    if gemini_circuit_breaker.is_open:
+        logger.error("🚨 Circuit breaker открыт: Gemini недавно стабильно падал, пропускаю попытки.")
+        raise GeminiUnavailableError()
+
     image_parts = prepare_input_files(file_paths)
     if not image_parts:
         return "{}"
@@ -144,6 +151,7 @@ def extract_raw_data(file_paths: list[str], retries: int = 3) -> str:
     client = get_client()
     for attempt in range(retries):
         try:
+            call_start = time.time()
             response = client.models.generate_content(
                 model=VISION_MODEL_NAME,
                 contents=contents,
@@ -153,6 +161,7 @@ def extract_raw_data(file_paths: list[str], retries: int = 3) -> str:
                     thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.HIGH),
                 ),
             )
+            GEMINI_CALL_DURATION.labels(agent="vision").observe(time.time() - call_start)
 
             data = safe_parse_json(response.text, expected_type='object')
             if not data:
@@ -166,9 +175,13 @@ def extract_raw_data(file_paths: list[str], retries: int = 3) -> str:
 
             elapsed = time.time() - start_time
             logger.info(f"🧠 АГЕНТ 1 отработал за {elapsed:.2f} сек.")
+            GEMINI_CALLS.labels(agent="vision", outcome="success").inc()
+            gemini_circuit_breaker.record_success()
             return json.dumps(data, ensure_ascii=False)
 
         except Exception as e:
+            GEMINI_CALLS.labels(agent="vision", outcome="error").inc()
+            gemini_circuit_breaker.record_failure()
             logger.warning(f"⚠️ Попытка {attempt + 1} провалена: {e}")
             time.sleep(2 ** attempt)
 

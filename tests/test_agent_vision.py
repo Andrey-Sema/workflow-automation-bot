@@ -134,3 +134,41 @@ def test_extract_raw_data_rejects_response_without_deceased_block(mock_get_clien
         result = extract_raw_data([str(path)], retries=1)
 
     assert result == "{}"
+
+
+def test_extract_raw_data_fails_fast_when_circuit_breaker_open(tmp_path):
+    from src.circuit_breaker import gemini_circuit_breaker
+    from src.errors import GeminiUnavailableError
+
+    path = _make_image(tmp_path / "photo.jpg")
+    gemini_circuit_breaker.record_failure()  # threshold is 5; force it open directly
+    for _ in range(10):
+        gemini_circuit_breaker.record_failure()
+
+    with patch("src.agent_vision.get_client") as mock_get_client, pytest.raises(GeminiUnavailableError):
+        extract_raw_data([str(path)])
+
+    mock_get_client.assert_not_called()  # never even tries to build a client
+
+
+@patch("src.agent_vision.get_client")
+def test_extract_raw_data_records_success_on_the_shared_breaker(mock_get_client, tmp_path):
+    from src.circuit_breaker import gemini_circuit_breaker
+
+    path = _make_image(tmp_path / "photo.jpg")
+    gemini_circuit_breaker.record_failure()
+    gemini_circuit_breaker.record_failure()
+
+    mock_response = MagicMock()
+    mock_response.text = json.dumps({"deceased": {"fio": "Тест"}})
+    mock_client = MagicMock()
+    mock_client.models.generate_content.return_value = mock_response
+    mock_get_client.return_value = mock_client
+
+    extract_raw_data([str(path)])
+
+    assert gemini_circuit_breaker.is_open is False
+    # success resets the streak - a *new* single failure shouldn't be
+    # enough to trip a breaker with the default threshold of 5
+    gemini_circuit_breaker.record_failure()
+    assert gemini_circuit_breaker.is_open is False

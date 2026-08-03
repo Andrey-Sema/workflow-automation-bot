@@ -58,6 +58,11 @@ class Settings(BaseSettings):
     telegram_operator_ids: list[int] = Field(default_factory=list, alias="TELEGRAM_OPERATOR_IDS")
     telegram_log_chat_id: int | None = Field(default=None, alias="TELEGRAM_LOG_CHAT_ID")
     telegram_max_file_mb: int = Field(default=20, alias="TELEGRAM_MAX_FILE_MB")
+    # Minimum seconds between two updates from the same chat before the
+    # second one is throttled. Guards Gemini quota / duplicate 1C-entry
+    # queuing against accidental rapid-fire button mashing, not abuse (the
+    # bot is only reachable by allowlisted operators to begin with).
+    telegram_throttle_seconds: float = Field(default=0.7, alias="TELEGRAM_THROTTLE_SECONDS")
 
     # --- 1C / RDP automation ---
     onec_dry_run: bool = Field(default=True, alias="ONEC_DRY_RUN")
@@ -77,6 +82,10 @@ class Settings(BaseSettings):
     # --- Logging ---
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     log_json: bool = Field(default=False, alias="LOG_JSON")
+
+    # --- Metrics (Prometheus) ---
+    metrics_enabled: bool = Field(default=True, alias="METRICS_ENABLED")
+    metrics_port: int = Field(default=9090, alias="METRICS_PORT")
 
     @field_validator("telegram_admin_ids", "telegram_operator_ids", mode="before")
     @classmethod

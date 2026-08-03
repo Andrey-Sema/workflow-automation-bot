@@ -19,12 +19,18 @@ from typing import Any
 import pyautogui
 from google.genai import types
 
+from src.circuit_breaker import gemini_circuit_breaker
 from src.config import BOOKED_MODEL_NAME
 from src.gemini_client import get_client
+from src.metrics import GEMINI_CALL_DURATION, GEMINI_CALLS
 from src.settings import get_settings
 from src.utils import clean_service_name, safe_int, safe_parse_json
 
 logger = logging.getLogger(__name__)
+
+# Debug screenshots are pure diagnostics; without a cap the directory grows
+# by one JPEG per duplicate-scan forever and slowly eats the data volume.
+MAX_DEBUG_SCREENSHOTS = 50
 
 BOOKED_ITEMS_PROMPT = """
 Ты — AI-сканер интерфейса 1С. На скриншоте открыта таблица "Услуги".
@@ -62,6 +68,15 @@ def validate_items(items: list[dict]) -> list[dict]:
     return valid
 
 
+def _prune_old_screenshots(debug_dir) -> None:
+    try:
+        shots = sorted(debug_dir.glob("screenshot_*.jpg"))
+        for stale in shots[:-MAX_DEBUG_SCREENSHOTS]:
+            stale.unlink(missing_ok=True)
+    except OSError as e:
+        logger.warning(f"⚠️ Не удалось почистить старые debug-скриншоты: {e}")
+
+
 def capture_booked_items_screenshot() -> list[dict[str, Any]]:
     """Screenshots the current display (Xvfb/RDP or local), asks Gemini to
     read the 1C "Услуги" table off it, and returns the parsed+validated
@@ -80,6 +95,7 @@ def capture_booked_items_screenshot() -> list[dict[str, Any]]:
     debug_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     full_screen_img.save(debug_dir / f"screenshot_{timestamp}.jpg", format='JPEG', quality=85)
+    _prune_old_screenshots(debug_dir)
 
     img_byte_arr = io.BytesIO()
     full_screen_img.save(img_byte_arr, format='JPEG', quality=85, optimize=True)
@@ -89,6 +105,7 @@ def capture_booked_items_screenshot() -> list[dict[str, Any]]:
 
     try:
         client = get_client()
+        call_start = time.time()
         response = client.models.generate_content(
             model=BOOKED_MODEL_NAME,
             contents=[
@@ -97,17 +114,24 @@ def capture_booked_items_screenshot() -> list[dict[str, Any]]:
             ],
             config=types.GenerateContentConfig(temperature=0.0, response_mime_type="application/json"),
         )
+        GEMINI_CALL_DURATION.labels(agent="booked_ocr").observe(time.time() - call_start)
 
         raw_items = safe_parse_json(response.text, expected_type='array')
         if not raw_items:
+            GEMINI_CALLS.labels(agent="booked_ocr", outcome="error").inc()
+            gemini_circuit_breaker.record_failure()
             logger.warning("⚠️ ИИ не нашел услуг на скрине или вернул кривой ответ.")
             return []
 
         items = validate_items(raw_items)
         logger.info(f"✅ Распознано {len(items)} услуг из 1С")
+        GEMINI_CALLS.labels(agent="booked_ocr", outcome="success").inc()
+        gemini_circuit_breaker.record_success()
         return items
 
     except Exception as e:
+        GEMINI_CALLS.labels(agent="booked_ocr", outcome="error").inc()
+        gemini_circuit_breaker.record_failure()
         logger.error(f"❌ Ошибка визуального агента: {e}", exc_info=True)
         return []
 

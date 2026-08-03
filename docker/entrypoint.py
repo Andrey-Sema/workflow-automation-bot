@@ -24,6 +24,12 @@ from pathlib import Path
 DISPLAY = os.environ.get("DISPLAY", ":99")
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/app/data"))
 RDP_STATUS_PATH = DATA_DIR / ".rdp_status"
+# Bad credentials or an unreachable host almost always make xfreerdp3 exit
+# within a couple of seconds. Waiting this long before trusting "connected"
+# keeps src/rdp_status.py's 1C safety gate from waving through real
+# keystrokes against a session that only *started* connecting, not one that
+# actually rendered a desktop.
+RDP_CONNECT_GRACE_SECONDS = float(os.environ.get("RDP_CONNECT_GRACE_SECONDS", "3"))
 
 children: list[subprocess.Popen] = []
 _shutting_down = threading.Event()
@@ -134,8 +140,19 @@ def rdp_supervisor_loop() -> None:
                 proc.stdin.flush()
                 proc.stdin.close()
 
-        RDP_STATUS_PATH.write_text("connected", encoding="utf-8")
-        returncode = proc.wait()
+        deadline = time.time() + RDP_CONNECT_GRACE_SECONDS
+        while time.time() < deadline and proc.poll() is None:
+            time.sleep(0.2)
+
+        if proc.poll() is None:
+            # Survived the grace window without exiting - treat as a real
+            # connection, not just "the process started".
+            RDP_STATUS_PATH.write_text("connected", encoding="utf-8")
+            backoff = 2.0
+            returncode = proc.wait()
+        else:
+            returncode = proc.returncode
+
         if proc in children:
             children.remove(proc)
 

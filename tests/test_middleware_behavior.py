@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock
 from src.errors import FileIntakeError
 from src.operators_store import OperatorsStore
 from src.settings import Settings
-from src.telegram_bot.middlewares import AccessControlMiddleware, ErrorHandlingMiddleware
+from src.telegram_bot.middlewares import AccessControlMiddleware, ErrorHandlingMiddleware, ThrottlingMiddleware
 
 
 def fake_event(**overrides):
@@ -92,6 +92,67 @@ async def test_error_handling_middleware_passes_through_on_success():
         return "result"
 
     assert await middleware(ok_handler, fake_event(), {}) == "result"
+
+
+async def test_throttling_allows_first_update_from_a_chat():
+    middleware = ThrottlingMiddleware(min_interval=10.0)
+    handler = AsyncMock(return_value="ok")
+
+    result = await middleware(handler, fake_event(), {})
+
+    handler.assert_awaited_once()
+    assert result == "ok"
+
+
+async def test_throttling_blocks_rapid_second_update_from_same_chat():
+    middleware = ThrottlingMiddleware(min_interval=10.0)
+    handler = AsyncMock(return_value="ok")
+
+    await middleware(handler, fake_event(), {})
+    handler.reset_mock()
+    result = await middleware(handler, fake_event(), {})
+
+    handler.assert_not_awaited()
+    assert result is None
+
+
+async def test_throttling_allows_update_after_interval_elapses():
+    middleware = ThrottlingMiddleware(min_interval=0.05)
+    handler = AsyncMock(return_value="ok")
+
+    await middleware(handler, fake_event(), {})
+    import asyncio
+    await asyncio.sleep(0.06)
+    handler.reset_mock()
+    result = await middleware(handler, fake_event(), {})
+
+    handler.assert_awaited_once()
+    assert result == "ok"
+
+
+async def test_throttling_tracks_chats_independently():
+    middleware = ThrottlingMiddleware(min_interval=10.0)
+    handler = AsyncMock(return_value="ok")
+
+    await middleware(handler, fake_event(chat=SimpleNamespace(id=1)), {})
+    handler.reset_mock()
+    result = await middleware(handler, fake_event(chat=SimpleNamespace(id=2)), {})
+
+    handler.assert_awaited_once()
+    assert result == "ok"
+
+
+async def test_throttling_clears_callback_spinner_without_extra_message():
+    middleware = ThrottlingMiddleware(min_interval=10.0)
+    handler = AsyncMock(return_value="ok")
+
+    callback_like = SimpleNamespace(chat=SimpleNamespace(id=42), data="some:callback", answer=AsyncMock())
+    await middleware(handler, callback_like, {})
+
+    second = SimpleNamespace(chat=SimpleNamespace(id=42), data="some:callback", answer=AsyncMock())
+    await middleware(handler, second, {})
+
+    second.answer.assert_awaited_once_with()  # no text - just dismisses the spinner
 
 
 async def test_error_handling_middleware_replies_via_callback_message():

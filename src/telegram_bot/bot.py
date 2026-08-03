@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import queue
 import time
 
 from aiogram import Bot, Dispatcher
@@ -19,7 +20,13 @@ from src.preflight import run_preflight
 from src.settings import get_settings, require_telegram_token
 from src.telegram_bot.handlers import admin, common, orders
 from src.telegram_bot.locks import onec_entry_lock
-from src.telegram_bot.middlewares import AccessControlMiddleware, CorrelationIdMiddleware, ErrorHandlingMiddleware
+from src.telegram_bot.metrics_server import gauge_refresh_loop, start_metrics_server
+from src.telegram_bot.middlewares import (
+    AccessControlMiddleware,
+    CorrelationIdMiddleware,
+    ErrorHandlingMiddleware,
+    ThrottlingMiddleware,
+)
 from src.telegram_bot.sqlite_storage import SQLiteStorage
 
 logger = logging.getLogger(__name__)
@@ -56,9 +63,18 @@ async def _drain_log_queue_to_chat(bot: Bot, chat_id: int, handler: TelegramQueu
     """Background task: forwards WARNING+ log records to an admin chat.
     Never lets a broken Telegram API call take down logging — errors here
     are swallowed after one retry-free attempt.
+
+    Polls with get_nowait()+sleep instead of parking a to_thread worker on
+    a blocking queue.get(): task.cancel() can't reach a thread stuck in
+    queue.get(), and asyncio.run()'s executor shutdown then joins that
+    thread — hanging the whole process on SIGTERM until Docker SIGKILLs it.
     """
     while True:
-        level, text = await asyncio.to_thread(handler.queue.get)
+        try:
+            level, text = handler.queue.get_nowait()
+        except queue.Empty:
+            await asyncio.sleep(0.5)
+            continue
         try:
             prefix = "🚨" if level in ("ERROR", "CRITICAL") else "⚠️"
             await bot.send_message(chat_id, f"{prefix} {text[:3900]}")
@@ -68,7 +84,14 @@ async def _drain_log_queue_to_chat(bot: Bot, chat_id: int, handler: TelegramQueu
 
 async def _heartbeat_loop(path) -> None:
     while True:
-        path.write_text(str(time.time()), encoding="utf-8")
+        try:
+            path.write_text(str(time.time()), encoding="utf-8")
+        except OSError:
+            # Transient (disk full, volume remount): keep looping. If it
+            # keeps failing the file goes stale and Docker's healthcheck
+            # restarts us anyway - which is the right escalation, unlike a
+            # silently dead heartbeat task after a single blip.
+            logger.warning("⚠️ Не удалось записать heartbeat-файл", exc_info=True)
         await asyncio.sleep(30)
 
 
@@ -85,6 +108,12 @@ def build_dispatcher(order_store: OrderStore, operators_store: OperatorsStore, s
         observer.outer_middleware(CorrelationIdMiddleware())
         observer.outer_middleware(access_control)
         observer.outer_middleware(ErrorHandlingMiddleware())
+    # Callback-only, NOT on dp.message: Telegram delivers a multi-photo
+    # album as several separate Message updates milliseconds apart, and a
+    # per-chat throttle on messages would silently drop every photo after
+    # the first. Button mashing (the thing worth throttling — duplicate
+    # Gemini runs, double 1C entries) only ever arrives as CallbackQuery.
+    dp.callback_query.outer_middleware(ThrottlingMiddleware(settings.telegram_throttle_seconds))
 
     dp.include_router(orders.router)
     dp.include_router(admin.router)
@@ -116,11 +145,18 @@ async def run() -> None:
 
     dp = build_dispatcher(order_store, operators_store, fsm_storage)
 
-    background_tasks = [asyncio.create_task(_heartbeat_loop(settings.data_dir / HEARTBEAT_PATH_NAME))]
+    background_tasks = [
+        asyncio.create_task(_heartbeat_loop(settings.data_dir / HEARTBEAT_PATH_NAME)),
+    ]
     if telegram_handler is not None:
         background_tasks.append(
             asyncio.create_task(_drain_log_queue_to_chat(bot, settings.telegram_log_chat_id, telegram_handler))
         )
+
+    metrics_runner = None
+    if settings.metrics_enabled:
+        metrics_runner = await start_metrics_server(settings.metrics_port)
+        background_tasks.append(asyncio.create_task(gauge_refresh_loop(settings, order_store)))
 
     logger.info("🤖 Workflow Automation Bot: запуск long-polling...")
     try:
@@ -129,5 +165,7 @@ async def run() -> None:
         await _wait_for_inflight_onec_entry(settings.shutdown_grace_seconds)
         for task in background_tasks:
             task.cancel()
+        if metrics_runner is not None:
+            await metrics_runner.cleanup()
         await bot.session.close()
         await fsm_storage.close()

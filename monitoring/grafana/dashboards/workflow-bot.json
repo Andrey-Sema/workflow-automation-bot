@@ -1,0 +1,83 @@
+{
+  "title": "Workflow Automation Bot",
+  "uid": "workflow-automation-bot",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    { "title": "Overview", "type": "row", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }, "id": 100, "panels": [] },
+    {
+      "id": 1, "title": "RDP connection", "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
+      "targets": [{ "expr": "workflow_rdp_connected", "refId": "A" }],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+        }
+      }
+    },
+    {
+      "id": 2, "title": "Orders pending confirmation", "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
+      "targets": [{ "expr": "workflow_orders_pending", "refId": "A" }]
+    },
+    {
+      "id": 3, "title": "1C items entered (total)", "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 1 },
+      "targets": [{ "expr": "workflow_onec_items_entered_total", "refId": "A" }]
+    },
+    {
+      "id": 4, "title": "Telegram access denied (1h)", "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 1 },
+      "targets": [{ "expr": "increase(workflow_telegram_access_total{result=\"denied\"}[1h])", "refId": "A" }],
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }] } } }
+    },
+
+    { "title": "Pipeline", "type": "row", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 }, "id": 101, "panels": [] },
+    {
+      "id": 10, "title": "Pipeline runs / min, by outcome", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "targets": [{ "expr": "sum by (outcome) (rate(workflow_pipeline_runs_total[5m])) * 60", "legendFormat": "{{outcome}}", "refId": "A" }]
+    },
+    {
+      "id": 11, "title": "Pipeline duration (p50 / p95)", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum by (le) (rate(workflow_pipeline_duration_seconds_bucket[5m])))", "legendFormat": "p50", "refId": "A" },
+        { "expr": "histogram_quantile(0.95, sum by (le) (rate(workflow_pipeline_duration_seconds_bucket[5m])))", "legendFormat": "p95", "refId": "B" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+
+    { "title": "Gemini API", "type": "row", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 }, "id": 102, "panels": [] },
+    {
+      "id": 20, "title": "Gemini calls / min, by agent & outcome", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 15 },
+      "targets": [{ "expr": "sum by (agent, outcome) (rate(workflow_gemini_calls_total[5m])) * 60", "legendFormat": "{{agent}} / {{outcome}}", "refId": "A" }]
+    },
+    {
+      "id": 21, "title": "Gemini call latency p95, by agent", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 15 },
+      "targets": [{ "expr": "histogram_quantile(0.95, sum by (agent, le) (rate(workflow_gemini_call_duration_seconds_bucket[5m])))", "legendFormat": "{{agent}}", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+
+    { "title": "1C Entry", "type": "row", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 23 }, "id": 103, "panels": [] },
+    {
+      "id": 30, "title": "1C entry attempts / hour, by outcome", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "targets": [{ "expr": "sum by (outcome) (rate(workflow_onec_entries_total[15m])) * 3600", "legendFormat": "{{outcome}}", "refId": "A" }]
+    },
+    {
+      "id": 31, "title": "1C наряд entry duration (p95)", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "targets": [{ "expr": "histogram_quantile(0.95, sum by (le) (rate(workflow_onec_entry_duration_seconds_bucket[15m])))", "legendFormat": "p95", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    }
+  ]
+}

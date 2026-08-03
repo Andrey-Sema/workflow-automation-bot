@@ -60,3 +60,48 @@ async def test_gives_up_after_timeout_without_raising(fresh_lock, caplog):
         assert any("Не дождался" in r.message for r in caplog.records)
     finally:
         fresh_lock.release()
+
+
+async def test_log_drain_task_is_cancellable():
+    """Regression: the drain loop must never park a to_thread worker on a
+    blocking queue.get() — task.cancel() can't reach such a thread, and
+    asyncio.run()'s executor shutdown then joins it, hanging the whole
+    process on SIGTERM until Docker SIGKILLs it. The threadless poll loop
+    must cancel promptly instead."""
+    from unittest.mock import AsyncMock
+
+    from src.logging_setup import TelegramQueueHandler
+    from src.telegram_bot.bot import _drain_log_queue_to_chat
+
+    handler = TelegramQueueHandler()
+    bot = AsyncMock()
+    task = asyncio.create_task(_drain_log_queue_to_chat(bot, 123, handler))
+    await asyncio.sleep(0.05)  # let it reach the empty-queue sleep
+
+    task.cancel()
+    # Must finish within the wait_for window - a stuck task would raise TimeoutError.
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, timeout=2)
+
+
+async def test_log_drain_forwards_queued_records():
+    from unittest.mock import AsyncMock
+
+    from src.logging_setup import TelegramQueueHandler
+    from src.telegram_bot.bot import _drain_log_queue_to_chat
+
+    handler = TelegramQueueHandler()
+    handler.queue.put_nowait(("ERROR", "boom happened"))
+    handler.queue.put_nowait(("WARNING", "just a warning"))
+
+    bot = AsyncMock()
+    task = asyncio.create_task(_drain_log_queue_to_chat(bot, 123, handler))
+    for _ in range(50):
+        if bot.send_message.await_count >= 2:
+            break
+        await asyncio.sleep(0.02)
+    task.cancel()
+
+    sent = [call.args for call in bot.send_message.await_args_list]
+    assert sent[0] == (123, "🚨 boom happened")
+    assert sent[1] == (123, "⚠️ just a warning")

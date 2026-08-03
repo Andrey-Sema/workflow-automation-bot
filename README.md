@@ -128,6 +128,54 @@ argument, so it doesn't show up in `ps aux` inside the container.
 Admin-only: `/status`, `/tariffs`, `/set_tariff <key> <value>`,
 `/reload_catalog`, `/operators`, `/add_operator <id>`, `/remove_operator <id>`.
 
+## 🛡 Resilience & safety
+
+- **RDP safety gate** — real (non-dry-run) 1C entry is refused outright while
+  `.rdp_status` isn't `connected`: blind keystrokes into a screen that isn't
+  showing 1C are worse than not typing at all (`src/rdp_status.py`).
+- **Graceful shutdown** — on SIGTERM the bot stops taking updates but waits
+  up to `SHUTDOWN_GRACE_SECONDS` (default 45s) for an in-flight 1C entry to
+  finish before exiting; `docker/entrypoint.py` keeps Xvfb/FreeRDP alive
+  until the bot process is done, and compose's `stop_grace_period: 60s`
+  gives the whole dance room to complete.
+- **Single-writer 1C lock** — one shared lock serializes every ✅/❌ action
+  against the physical 1C window; double-taps and stale buttons re-check the
+  order's status after acquiring it, so an already-entered наряд can't be
+  re-entered or flipped back to "cancelled".
+- **Gemini circuit breaker** — after 5 consecutive API failures all agents
+  fail fast for 60s instead of burning full retry/backoff cycles per order
+  (`src/circuit_breaker.py`).
+- **Callback throttling** — repeated button taps within
+  `TELEGRAM_THROTTLE_SECONDS` (default 0.7s) are dropped. Deliberately *not*
+  applied to messages: Telegram delivers a multi-photo album as separate
+  updates milliseconds apart.
+- **Persistent FSM storage** — the order wizard's state lives in SQLite
+  (`data/fsm_storage.db`), so a container restart doesn't lose an operator's
+  half-collected draft (`src/telegram_bot/sqlite_storage.py`).
+- **Startup preflight** — token/API-key/data-dir/catalog checks run before
+  polling starts, so misconfiguration fails loudly at boot instead of at the
+  first order (`src/preflight.py`).
+
+## 📊 Monitoring (Prometheus + Grafana)
+
+The bot exposes Prometheus metrics on `:9090/metrics` (toggle with
+`METRICS_ENABLED` / `METRICS_PORT`): pipeline runs/durations, per-agent
+Gemini call outcomes and latencies, 1C entry outcomes and typed-item counts,
+RDP connectivity, circuit-breaker state, pending orders, and allowed/denied
+Telegram access.
+
+`docker compose up -d` also starts:
+
+- **prometheus** — scrapes the bot every 15s, 30-day retention
+  (`monitoring/prometheus.yml`); not published to the host by default.
+- **grafana** — `http://<host>:3000`, admin password from
+  `GRAFANA_ADMIN_PASSWORD` in `.env` (default `admin` — change it). The
+  "Workflow Automation Bot" dashboard is provisioned automatically
+  (`monitoring/grafana/dashboards/workflow-bot.json`).
+
+Run only the bot with `docker compose up -d bot` if you don't want the
+monitoring stack.
+
 ## 🛠 Tech stack
 
 | Category      | Tools |
@@ -138,6 +186,7 @@ Admin-only: `/status`, `/tariffs`, `/set_tariff <key> <value>`,
 | Validation     | Pydantic v2, `pydantic-settings` |
 | Automation     | PyAutoGUI (unchanged low-level input), FreeRDP (`xfreerdp3`), Xvfb |
 | Quality        | ruff, bandit, pytest, pytest-cov, Hypothesis (property-based testing) |
+| Monitoring     | prometheus-client, aiohttp (`/metrics`), Prometheus, Grafana |
 | Deployment     | Docker (single image: Xvfb + FreeRDP + bot), docker-compose |
 
 ## 📁 Layout
@@ -153,12 +202,16 @@ src/
   pipeline.py                                # shared orchestration (CLI + bot)
   order_conflicts.py, summary_formatting.py  # confirmation summary
   order_store.py, operators_store.py         # sqlite / JSON persistence
+  rdp_status.py, preflight.py                # RDP safety gate, startup checks
+  circuit_breaker.py, metrics.py             # resilience + Prometheus metric defs
   win_1c_bot.py                              # ⚠️ untouched low-level input
   onec_order_entry.py                        # 1C order-entry automation (new)
-  telegram_bot/                              # aiogram bot: handlers, middlewares, keyboards
+  telegram_bot/                              # aiogram bot: handlers, middlewares, keyboards,
+                                             #   sqlite FSM storage, /metrics server
 docker/entrypoint.py                         # Xvfb + FreeRDP supervisor + bot launcher
+monitoring/                                  # Prometheus config + Grafana provisioning/dashboard
 tools/                                       # manual calibration scripts (native OS, not in Docker)
-tests/                                       # pytest + Hypothesis, ~84% coverage on src/
+tests/                                       # pytest + Hypothesis, ~85% coverage on src/
 ```
 
 ## 🧪 Development

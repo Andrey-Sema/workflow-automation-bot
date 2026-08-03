@@ -121,6 +121,76 @@ def test_shutdown_signal_terminates_only_bot_when_bot_is_running():
     assert entrypoint._shutting_down.is_set()
 
 
+def test_rdp_supervisor_never_reports_connected_if_process_dies_in_grace_window(monkeypatch, tmp_path):
+    """Regression: a bad-password/unreachable-host xfreerdp3 exits almost
+    immediately. .rdp_status must never say "connected" for a process that
+    never survived the grace window - src/rdp_status.py's safety gate
+    trusts that file before allowing real 1C keystrokes."""
+    monkeypatch.setenv("RDP_HOST", "host")
+    monkeypatch.setattr(entrypoint, "RDP_CONNECT_GRACE_SECONDS", 0.05)
+    monkeypatch.setattr(entrypoint, "RDP_STATUS_PATH", tmp_path / ".rdp_status")
+
+    fake_proc = MagicMock()
+    fake_proc.stdin = MagicMock()
+    fake_proc.poll.return_value = 1  # already exited by the time we check
+    fake_proc.returncode = 1
+
+    monkeypatch.setattr(entrypoint, "_spawn", lambda *a, **k: fake_proc)
+
+    statuses_written = []
+    real_write_text = Path.write_text
+
+    def tracking_write_text(self, content, **kwargs):
+        if self == entrypoint.RDP_STATUS_PATH:
+            statuses_written.append(content)
+        return real_write_text(self, content, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", tracking_write_text)
+
+    def stop_after_one_iteration(*a, **k):
+        entrypoint._shutting_down.set()
+
+    monkeypatch.setattr(entrypoint.time, "sleep", stop_after_one_iteration)
+
+    entrypoint.rdp_supervisor_loop()
+
+    assert "connected" not in statuses_written
+    assert any(s.startswith("disconnected") for s in statuses_written)
+
+
+def test_rdp_supervisor_reports_connected_once_process_survives_grace_window(monkeypatch, tmp_path):
+    monkeypatch.setenv("RDP_HOST", "host")
+    monkeypatch.setattr(entrypoint, "RDP_CONNECT_GRACE_SECONDS", 0.05)
+    monkeypatch.setattr(entrypoint, "RDP_STATUS_PATH", tmp_path / ".rdp_status")
+
+    fake_proc = MagicMock()
+    fake_proc.stdin = MagicMock()
+    fake_proc.poll.return_value = None  # still running throughout
+
+    def fake_wait():
+        entrypoint._shutting_down.set()  # stop the loop after this "session"
+        return 0
+
+    fake_proc.wait.side_effect = fake_wait
+
+    monkeypatch.setattr(entrypoint, "_spawn", lambda *a, **k: fake_proc)
+
+    statuses_written = []
+    real_write_text = Path.write_text
+
+    def tracking_write_text(self, content, **kwargs):
+        if self == entrypoint.RDP_STATUS_PATH:
+            statuses_written.append(content)
+        return real_write_text(self, content, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", tracking_write_text)
+
+    entrypoint.rdp_supervisor_loop()
+
+    assert "connected" in statuses_written
+    assert statuses_written.index("connected") > statuses_written.index("connecting")
+
+
 def test_shutdown_signal_terminates_everything_if_bot_not_started_yet():
     """If the signal arrives during Xvfb/RDP startup (before the bot
     process exists), there's nothing graceful to wait for - tear down

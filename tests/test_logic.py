@@ -167,6 +167,19 @@ def test_validate_and_normalize_prompt_includes_catalog_data():
         assert kwargs["config"].response_mime_type == "application/json"
 
 
+def test_validate_and_normalize_fails_fast_when_circuit_breaker_open():
+    from src.circuit_breaker import gemini_circuit_breaker
+    from src.errors import GeminiUnavailableError
+
+    for _ in range(10):
+        gemini_circuit_breaker.record_failure()
+
+    with patch("src.agent_logic.get_client") as mock_get_client, pytest.raises(GeminiUnavailableError):
+        agent_logic.validate_and_normalize("Снос - 1000", num_addresses=0, booked_in_1c=[])
+
+    mock_get_client.assert_not_called()
+
+
 # --- ТЕСТЫ ВАЛИДАТОРА (PYDANTIC) ---
 
 def test_validator_calculates_total_correctly():

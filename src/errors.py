@@ -27,6 +27,10 @@ class GeminiParsingError(WorkflowError):
     default_message = "🧠 Нейросеть не смогла распознать бланк. Попробуй переснять фото при хорошем освещении."
 
 
+class GeminiUnavailableError(WorkflowError):
+    default_message = "🧠 Gemini API сейчас недоступен (несколько ошибок подряд). Попробуй через минуту."
+
+
 class ValidationFailedError(WorkflowError):
     default_message = "🛡️ Данные не прошли проверку структуры. Наряд нужно проверить вручную."
 
@@ -37,10 +41,6 @@ class FileIntakeError(WorkflowError):
 
 class AccessDeniedError(WorkflowError):
     default_message = "⛔ У тебя нет доступа к этой функции бота."
-
-
-class OrderNotFoundError(WorkflowError):
-    default_message = "🔍 Наряд не найден (возможно, уже обработан или отменён)."
 
 
 class RdpConnectionError(WorkflowError):
