@@ -1,61 +1,45 @@
-import os
-import json
+"""Local CLI entry point — mainly for debugging the pipeline without
+Telegram. The primary, supported way to run orders is the Telegram bot
+(`python -m src.telegram_bot`); see README.md.
+"""
+
 import logging
 import shutil
 import time
+import uuid
 from pathlib import Path
-from dotenv import load_dotenv
 
-# Инициализируем переменные окружения (Новый SDK сам подхватит GEMINI_API_KEY)
-load_dotenv()
-API_KEY = os.getenv("GEMINI_API_KEY")
-if not API_KEY:
-    raise RuntimeError("❌ GEMINI_API_KEY not found in .env!")
+from src.agent_booked_ocr import get_booked_items_via_screenshot_cli
+from src.errors import WorkflowError
+from src.logging_setup import setup_logging
+from src.onec_order_entry import OneCOrderEntryBot
+from src.pipeline import run_pipeline, write_audit_log
+from src.settings import get_settings
+from src.summary_formatting import format_order_summary
 
-# --- LOCAL MODULE IMPORTS ---
-from src.agent_booked_ocr import get_booked_items_via_screenshot
-from src.ai_parser import parse_images_with_gemini
-from src.validator import validate_and_fix_order
-
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', datefmt='%H:%M:%S')
+settings = get_settings()
+settings.ensure_directories()
+setup_logging(settings.log_dir, settings.log_level, json_output=settings.log_json)
 logger = logging.getLogger(__name__)
 
-# Define base directories
-BASE_DIR = Path(__file__).resolve().parent
-INPUT_DIR = BASE_DIR / "data" / "input"
-PROCESSED_DIR = BASE_DIR / "data" / "processed"
-OUTPUT_DIR = BASE_DIR / "data" / "output"
-
-# Ensure required directories exist
-for directory in [INPUT_DIR, PROCESSED_DIR, OUTPUT_DIR]:
-    directory.mkdir(parents=True, exist_ok=True)
-
-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".pdf"}
 
 
 def get_all_photos_for_order() -> list[Path]:
-    """
-    Retrieves and sorts all image files from the input directory.
-    Returns an empty list if no valid images are found.
-    """
-    all_files = [f for f in INPUT_DIR.iterdir() if f.is_file() and f.suffix.lower() in IMAGE_EXTENSIONS]
+    """Retrieves and sorts all image files from the input directory."""
+    all_files = [f for f in settings.input_dir.iterdir() if f.is_file() and f.suffix.lower() in IMAGE_EXTENSIONS]
 
     if not all_files:
         logger.warning("⚠️ Input directory is empty! Please drop the order photos into 'data/input'.")
         return []
 
-    # Sort files by modification time (oldest first)
     all_files.sort(key=lambda x: x.stat().st_mtime)
     return all_files
 
 
-def run_cli():
-    """
-    Main CLI loop for the Workflow Automation Bot.
-    """
+def run_cli() -> None:
     logger.info("=" * 50)
-    logger.info("🤖 Workflow Automation Bot v2.0 | Enterprise Edition")
+    logger.info("🤖 Workflow Automation Bot | CLI (debug mode)")
     logger.info("=" * 50)
 
     while True:
@@ -81,73 +65,26 @@ def run_cli():
                 print("⚠️ Нужна цифра!")
 
         scan_1c = input("🕵️‍♂️ Сканируем открытый наряд в 1С на дубликаты? (1 - да / 2 - нет): ").strip()
-        booked_in_1c = []
-
-        if scan_1c == '1':
-            input("👉 Нажми Enter и переместись в экран наряда 1С для прочтения услуг... ")
-            booked_in_1c = get_booked_items_via_screenshot()
+        booked_in_1c = get_booked_items_via_screenshot_cli() if scan_1c == '1' else []
 
         logger.info(
-            f"🚀 В работе {len(photos_to_process)} файла(ов). Адресов: {num_addresses}. Броней в 1С: {len(booked_in_1c)}"
+            f"🚀 В работе {len(photos_to_process)} файла(ов). "
+            f"Адресов: {num_addresses}. Броней в 1С: {len(booked_in_1c)}"
         )
 
-        # Process images via Gemini pipeline
-        start_time = time.time()
-        raw_json_str, final_json_data = parse_images_with_gemini(photos_to_process, num_addresses, booked_in_1c)
-        end_time = time.time()
-
-        if not final_json_data:
-            logger.error("❌ Фатальная ошибка парсинга конвейера.")
+        order_id = uuid.uuid4().hex[:8]
+        try:
+            result = run_pipeline(photos_to_process, num_addresses, booked_in_1c)
+        except WorkflowError as e:
+            logger.error(e.user_message)
             continue
 
-        elapsed = round(end_time - start_time, 2)
-        logger.info(f"⏱ Нейросети отработали за: {elapsed} сек.")
+        write_audit_log(result, order_id)
+        print("\n" + format_order_summary(result.summary, order_id=order_id).replace("<b>", "").replace("</b>", ""))
 
-        # Validate and apply business rules
-        final_json_data = validate_and_fix_order(final_json_data)
+        if result.summary.has_conflicts:
+            logger.warning("⚠️ В наряде есть конфликты — см. сводку выше.")
 
-        if not final_json_data:
-            logger.error("❌ Данные не прошли Pydantic-валидацию. Разбирайся с логами.")
-            continue
-
-        # Check for missing birth date (Sentinel value check)
-        dob = final_json_data.get("deceased", {}).get("birth_date", "")
-        if dob == "01.01.1920":
-            logger.warning(
-                "🚨 СЕНТИЛЬНЫЙ ВАРНИНГ: Дата рождения не указана на бланке. Уточни у агента для таблички!"
-            )
-
-        # Output business rule warnings
-        for warning_msg in final_json_data.get("warnings", []):
-            logger.warning(f"🤬 АЛЕРТ ПО ДЕНЬГАМ/ПРАВИЛАМ: {warning_msg}")
-
-        # --- FINANCIAL CONTROL ---
-        handwritten = final_json_data.get("handwritten_total", 0)
-        calculated = final_json_data.get("calculated_total", 0)
-
-        if handwritten > 0:
-            if abs(handwritten - calculated) > (handwritten * 0.01):
-                logger.critical(
-                    f"🚨🚨🚨 ФИНАНСОВАЯ ТРЕВОГА! На бланке: {handwritten}, бот насчитал: {calculated}. Разница: {handwritten - calculated} грн."
-                )
-            else:
-                logger.info(f"✅ Финансовый контроль пройден: {calculated} грн.")
-        else:
-            logger.warning("⚠️ Бот не смог прочитать итоговую сумму с бланка. Проверь логи ручками.")
-
-        # Save operation log for audit
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
-        log_filename = f"order_log_{timestamp}.txt"
-        log_filepath = OUTPUT_DIR / log_filename
-
-        with open(log_filepath, "w", encoding="utf-8") as log_file:
-            log_file.write("=== STEP 1: RAW JSON (From Vision Agent) ===\n" + raw_json_str + "\n\n")
-            log_file.write("=== STEP 2: FINAL JSON (Post-Pydantic & Logic Engine) ===\n")
-            log_file.write(json.dumps(final_json_data, indent=4, ensure_ascii=False))
-
-        logger.info(f"💾 Лог сохранен: data/output/{log_filename}")
-
-        # --- HUMAN-IN-THE-LOOP (KILL SWITCH) ---
         print("\n" + "!" * 40)
         confirm = input("🤔 ВБИВАЕМ В 1С? (1 - ДА, любая другая клавиша - отмена): ").strip()
         print("!" * 40 + "\n")
@@ -156,18 +93,24 @@ def run_cli():
             logger.warning("🚫 Наряд отменен пользователем. Файлы остались в папке input.")
             continue
 
-        logger.info("⚡️ ПОЕХАЛИ! (Вызов 1С-модуля будет здесь)")
+        bot = OneCOrderEntryBot(settings=settings)
+        logger.info(f"⚡️ Ввод в 1С (dry_run={bot.dry_run})...")
+        try:
+            entered = bot.enter_order(result.order_data)
+            logger.info(f"✅ Внесено позиций: {len(entered)}")
+        except WorkflowError as e:
+            logger.error(f"{e.user_message} Наряд НЕ перемещён в processed — проверь 1С вручную.")
+            continue
 
-        # Move processed files to prevent duplicate processing
         for img_path in photos_to_process:
             for attempt in range(3):
                 try:
-                    shutil.move(str(img_path), str(PROCESSED_DIR / img_path.name))
+                    shutil.move(str(img_path), str(settings.processed_dir / img_path.name))
                     break
-                except Exception as e:
-                    time.sleep(1)  # Delay to handle potential Windows file locks
+                except OSError:
+                    time.sleep(1)
                     if attempt == 2:
-                        logger.error(f"❌ Ошибка перемещения {img_path.name}: {e}")
+                        logger.error(f"❌ Ошибка перемещения {img_path.name}")
 
         logger.info("✅ Наряд успешно отработан.")
 

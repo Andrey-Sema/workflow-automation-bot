@@ -1,6 +1,7 @@
 import logging
-from src.agent_vision import extract_raw_data
+
 from src.agent_logic import validate_and_normalize
+from src.agent_vision import extract_raw_data
 
 logger = logging.getLogger(__name__)
 

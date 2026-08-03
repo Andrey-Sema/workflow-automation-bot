@@ -1,0 +1,63 @@
+[project]
+name = "workflow-automation-bot"
+version = "3.0.0"
+description = "AI-powered funeral service order digitization pipeline with Telegram control panel and RDP-based 1C data entry."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+# win_1c_bot.py is the proven, hand-tuned low-level 1C/RDP input primitive —
+# deliberately excluded so no autofix ever touches it, even cosmetically.
+extend-exclude = ["tools", ".venv", "data", "src/win_1c_bot.py"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "W",   # pycodestyle warnings
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "SIM", # flake8-simplify
+    "S",   # flake8-bandit
+    "RUF", # ruff-specific rules
+]
+ignore = [
+    "S101",   # assert is fine in tests
+    "S603",   # subprocess call review handled manually (RDP entrypoint)
+    "S607",   # partial-path process invocation (docker entrypoint uses PATH by design)
+    "RUF001", # ambiguous-unicode-character-string: codebase is Cyrillic (RU/UA) by design
+    "RUF002", # same, in docstrings
+    "RUF003", # same, in comments
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "S105", "S106", "S311"]
+"tools/*" = ["S", "T201"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["src"]
+
+[tool.bandit]
+exclude_dirs = [".venv", "tests", "tools", "data"]
+skips = ["B101"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.coverage.run]
+source = ["src"]
+omit = ["src/telegram_bot/__main__.py"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+]

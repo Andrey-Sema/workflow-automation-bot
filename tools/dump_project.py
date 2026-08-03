@@ -1,7 +1,10 @@
 import os
 
 # Файлы и папки, которые НЕ надо копировать
-EXCLUDE_DIRS = {'.venv', '__pycache__', '.git', 'data', '.hypothesis', 'debug_screenshots'}
+EXCLUDE_DIRS = {
+    '.venv', '__pycache__', '.git', 'data', '.hypothesis', 'debug_screenshots',
+    '.pytest_cache', '.ruff_cache', '.mypy_cache', 'htmlcov',
+}
 EXCLUDE_FILES = {'dump_project.py', 'full_project_code.txt', '.env'}
 # Какие расширения берем
 INCLUDE_EXT = {'.py', '.txt', '.md', '.bat', '.gitignore'}
@@ -45,7 +48,7 @@ def collect_code():
 
                     out.write(f"\n\n{'=' * 20}\nFILE: {relative_path}\n{'=' * 20}\n\n")
                     try:
-                        with open(path, "r", encoding="utf-8") as f:
+                        with open(path, encoding="utf-8") as f:
                             out.write(f.read())
                     except Exception as e:
                         out.write(f"Ошибка чтения файла: {e}")

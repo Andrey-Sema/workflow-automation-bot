@@ -1,8 +1,10 @@
-import pytest
-import math
 import json
-from hypothesis import given, strategies as st, assume
-from src.utils import safe_int, clean_service_name, clean_json_response, safe_parse_json
+import math
+
+from hypothesis import assume, given
+from hypothesis import strategies as st
+
+from src.utils import clean_json_response, clean_service_name, safe_int, safe_parse_json
 
 # ==========================================
 # КОНСТАНТЫ ДЛЯ ТЕСТОВ
@@ -225,7 +227,13 @@ def test_clean_json_response_preserves_valid_json(text):
         original = json.loads(text)
         e_type = 'array' if isinstance(original, list) else 'object'
         cleaned = clean_json_response(text, expected_type=e_type)
-        assert json.loads(cleaned) == original
+        result = json.loads(cleaned)
+        # NaN != NaN by IEEE754 definition; json.loads('NaN') is valid
+        # (Python's non-standard extension), so it needs its own check.
+        if isinstance(original, float) and math.isnan(original):
+            assert isinstance(result, float) and math.isnan(result)
+        else:
+            assert result == original
     except json.JSONDecodeError:
         pass
 

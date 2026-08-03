@@ -1,9 +1,9 @@
-import re
 import json
 import logging
 import math
-from typing import Any, Dict, List, Optional, Union
+import re
 from datetime import datetime
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -51,21 +51,29 @@ def clean_json_response(text: Any, expected_type: str = 'object') -> str:
     return text.strip()
 
 
-def safe_parse_json(text: Any, expected_type: str = 'object') -> Optional[Union[Dict, List]]:
+def safe_parse_json(text: Any, expected_type: str = 'object') -> dict | list | None:
     """
     Безопасно парсит JSON с предварительной очисткой.
 
     Returns:
-        Распарсенный объект или None при ошибке
+        Распарсенный объект или None при ошибке, а также если тип
+        результата не совпадает с expected_type (защита от путаницы типов,
+        когда нейросеть вместо объекта присылает массив или наоборот).
     """
     try:
         cleaned = clean_json_response(text, expected_type)
         if not cleaned:
             return None
-        return json.loads(cleaned)
+        parsed = json.loads(cleaned)
     except (json.JSONDecodeError, TypeError, ValueError) as e:
         logger.debug(f"JSON parse error: {e}")
         return None
+
+    if expected_type == 'object' and not isinstance(parsed, dict):
+        return None
+    if expected_type == 'array' and not isinstance(parsed, list):
+        return None
+    return parsed
 
 
 # ==================== РАБОТА С ЧИСЛАМИ ====================
@@ -106,7 +114,7 @@ def fix_temporal_hallucinations(date_str: str) -> str:
     except ValueError:
         # Якщо дата в зовсім незрозумілому форматі, просто повертаємо почищену від крапки
         return date_str
-def parse_number_string(value: str) -> Optional[float]:
+def parse_number_string(value: str) -> float | None:
     if not isinstance(value, str):
         return None
 
@@ -162,12 +170,10 @@ def safe_int(value: Any, default: int = 0) -> int:
 
     # Если строка
     if isinstance(value, str):
-        # Пробуем распарсить число
+        # Пробуем распарсить число и сразу проверяем границы
         num = parse_number_string(value)
-        if num is not None:
-            # Проверяем границы
-            if MIN_PG_INT <= num <= MAX_PG_INT:
-                return int(num)
+        if num is not None and MIN_PG_INT <= num <= MAX_PG_INT:
+            return int(num)
         return default
 
     # Всё остальное
@@ -213,7 +219,7 @@ def clean_service_name(name: Any) -> str:
     return name.strip()
 
 
-def deduplicate_services(services: List[Dict]) -> List[Dict]:
+def deduplicate_services(services: list[dict]) -> list[dict]:
     """Удаляет дубликаты услуг, суммируя количество и забирая макс. цену."""
     if not services:
         return []

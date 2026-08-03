@@ -1,6 +1,9 @@
+import contextlib
 import logging
 from datetime import datetime
-from pydantic import BaseModel, Field, field_validator, ValidationError, ConfigDict
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+
 from src.utils import fix_temporal_hallucinations
 
 logger = logging.getLogger(__name__)
@@ -71,10 +74,8 @@ def validate_and_fix_order(order_data: dict) -> dict:
         }
 
         # Спасаем Deceased, чтобы применился fix_temporal_hallucinations
-        try:
+        with contextlib.suppress(ValidationError, TypeError):
             fixed_data['deceased'] = Deceased(**fixed_data['deceased']).model_dump()
-        except (ValidationError, TypeError):
-            pass
 
         for cat in ['services', 'goods', 'transport']:
             for s in order_data.get(cat, []):
