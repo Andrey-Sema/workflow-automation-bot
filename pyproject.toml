@@ -36,7 +36,9 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S101", "S105", "S106", "S311"]
+# S108: tests use "/tmp/..." strings as fake photo paths (never actually
+# written to) to exercise handler logic without touching the real filesystem.
+"tests/*" = ["S101", "S105", "S106", "S311", "S108"]
 "tools/*" = ["S", "T201"]
 
 [tool.ruff.lint.isort]
@@ -44,7 +46,10 @@ known-first-party = ["src"]
 
 [tool.bandit]
 exclude_dirs = [".venv", "tests", "tools", "data"]
-skips = ["B101"]
+# B101: assert is fine outside tests too (none currently outside tests, kept for parity with ruff config)
+# B603/B607: docker/entrypoint.py subprocess calls use fixed argv lists (never shell=True)
+# and rely on PATH for standard system binaries (Xvfb, xfreerdp3, ...) by design.
+skips = ["B101", "B603", "B607", "B404"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

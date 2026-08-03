@@ -1,0 +1,25 @@
+"""Smoke tests for bot wiring: no live Telegram connection needed, this
+just verifies the Dispatcher assembles without import/registration errors
+and that the expected routers + shared dependencies are present."""
+
+from src.operators_store import OperatorsStore
+from src.order_store import OrderStore
+from src.telegram_bot.bot import build_dispatcher
+
+
+def test_build_dispatcher_wiring(tmp_path):
+    # aiogram routers are module-level singletons that can only ever be
+    # attached to one Dispatcher, so this stays a single test (build once).
+    order_store = OrderStore(tmp_path / "orders.db")
+    operators_store = OperatorsStore(tmp_path / "operators.json")
+
+    dp = build_dispatcher(order_store, operators_store)
+
+    router_names = {router.name for router in dp.sub_routers}
+    assert router_names == {"orders", "admin", "common"}
+    # common must be included last: it has the catch-all `@router.message()`
+    assert dp.sub_routers[-1].name == "common"
+
+    assert dp["order_store"] is order_store
+    assert dp["operators_store"] is operators_store
+    assert dp["settings"] is not None

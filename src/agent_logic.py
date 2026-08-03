@@ -13,15 +13,35 @@ from src.utils import safe_parse_json
 logger = logging.getLogger(__name__)
 
 TEXT_MODEL_NAME = config.TEXT_MODEL_NAME
-SERVICES_JSON = config.SERVICES_JSON
-CEMETERIES_JSON = config.CEMETERIES_JSON
 
-# Единственный источник правды — data/catalog.json, загруженный в src.config.
-DIGGING_RULES = config.CATALOG_DATA.get("digging_rules", {})
-KNOWN_UNIT_PRICES = config.CATALOG_DATA.get("known_unit_prices", {})
-CATALOG_MAPPING = config.CATALOG_DATA.get("catalog_1c_mapping", {})
-SERVICES_LIST = config.CATALOG_DATA.get("services_list", [])
-TARIFFS = config.CATALOG_DATA.get("tariffs", {})
+
+def _load_from_catalog() -> None:
+    """(Re)derives the module-level catalog snapshots below from
+    `config.CATALOG_DATA` — the single source of truth. Called once at
+    import time and again by `refresh_from_catalog()` after the Telegram
+    admin panel edits catalog.json, so a running process picks up new
+    tariffs/mappings without a restart.
+    """
+    global SERVICES_JSON, CEMETERIES_JSON
+    global DIGGING_RULES, KNOWN_UNIT_PRICES, CATALOG_MAPPING, SERVICES_LIST, TARIFFS
+    SERVICES_JSON = config.SERVICES_JSON
+    CEMETERIES_JSON = config.CEMETERIES_JSON
+    DIGGING_RULES = config.CATALOG_DATA.get("digging_rules", {})
+    KNOWN_UNIT_PRICES = config.CATALOG_DATA.get("known_unit_prices", {})
+    CATALOG_MAPPING = config.CATALOG_DATA.get("catalog_1c_mapping", {})
+    SERVICES_LIST = config.CATALOG_DATA.get("services_list", [])
+    TARIFFS = config.CATALOG_DATA.get("tariffs", {})
+
+
+_load_from_catalog()
+
+
+def refresh_from_catalog() -> None:
+    """Call after `config.reload_catalog()` to pick up edits made through
+    the Telegram admin panel (tariffs, digging rules, ...) without
+    restarting the process."""
+    _load_from_catalog()
+    find_best_service_name.cache_clear()
 
 
 @lru_cache(maxsize=128)

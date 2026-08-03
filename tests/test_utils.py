@@ -22,8 +22,11 @@ def test_safe_int_returns_same_integer(val):
     assert safe_int(val) == val
 
 
-@given(st.integers().filter(lambda x: x > MAX_PG_INT or x < MIN_PG_INT))
+@given(st.integers(max_value=MIN_PG_INT - 1) | st.integers(min_value=MAX_PG_INT + 1))
 def test_safe_int_handles_db_overflow(val):
+    """Generates only out-of-range integers directly instead of filtering
+    st.integers() post-hoc, which Hypothesis's health check flags as too
+    wasteful (and was a source of flaky CI failures)."""
     assert safe_int(val, default=0) == 0
     assert safe_int(val, default=999) == 999
 

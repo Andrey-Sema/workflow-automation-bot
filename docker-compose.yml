@@ -1,0 +1,23 @@
+services:
+  bot:
+    build: .
+    image: workflow-automation-bot:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATA_DIR: /app/data
+    volumes:
+      - ./data:/app/data
+      # Optional: mount a Docker secret instead of RDP_PASSWORD in .env.
+      # - ./secrets/rdp_password:/run/secrets/rdp_password:ro
+    ports:
+      # noVNC live viewer — only actually served when DEBUG_VNC=true (see .env.example)
+      - "6080:6080"
+    shm_size: "1gb"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import pathlib,sys,time; p=pathlib.Path('/app/data/.health'); sys.exit(0 if p.exists() and time.time()-float(p.read_text())<90 else 1)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
