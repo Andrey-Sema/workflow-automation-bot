@@ -27,6 +27,7 @@ RDP_STATUS_PATH = DATA_DIR / ".rdp_status"
 
 children: list[subprocess.Popen] = []
 _shutting_down = threading.Event()
+_bot_proc: subprocess.Popen | None = None
 
 
 def _spawn(cmd: list[str], **kwargs) -> subprocess.Popen:
@@ -36,10 +37,24 @@ def _spawn(cmd: list[str], **kwargs) -> subprocess.Popen:
 
 
 def _handle_signal(signum, frame) -> None:
+    """On shutdown, terminate *only* the bot process first and let it exit
+    on its own (its own SIGTERM handler waits for any in-flight 1C entry to
+    finish — see src/telegram_bot/bot.py). main()'s tail, unblocked once
+    bot_proc.wait() returns, terminates Xvfb/xfreerdp3/etc. afterwards.
+    Killing everything at once here would race the bot's graceful
+    shutdown: it can't finish typing into 1C if Xvfb/xfreerdp3 already
+    died out from under it.
+    """
     _shutting_down.set()
-    for proc in list(children):
+    if _bot_proc is not None:
         with contextlib.suppress(ProcessLookupError):
-            proc.terminate()
+            _bot_proc.terminate()
+    else:
+        # No bot process yet (signal arrived during Xvfb/RDP startup) -
+        # nothing graceful to wait for, tear down everything immediately.
+        for proc in list(children):
+            with contextlib.suppress(ProcessLookupError):
+                proc.terminate()
 
 
 def _wait_for_display(timeout: float = 15) -> None:
@@ -134,6 +149,7 @@ def rdp_supervisor_loop() -> None:
 
 
 def main() -> int:
+    global _bot_proc
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)
 
@@ -145,9 +161,12 @@ def main() -> int:
     threading.Thread(target=rdp_supervisor_loop, daemon=True).start()
 
     print("🚀 Запускаю Telegram-бота...", flush=True)
-    bot_proc = _spawn([sys.executable, "-m", "src.telegram_bot"], env={**os.environ, "DISPLAY": DISPLAY})
-    returncode = bot_proc.wait()
+    _bot_proc = _spawn([sys.executable, "-m", "src.telegram_bot"], env={**os.environ, "DISPLAY": DISPLAY})
+    returncode = _bot_proc.wait()
 
+    # The bot has now exited (gracefully, waiting out any in-flight 1C
+    # entry itself - see _handle_signal above) - safe to tear down the
+    # display/RDP session it was driving.
     _shutting_down.set()
     for proc in list(children):
         if proc.poll() is None:

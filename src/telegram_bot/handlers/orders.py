@@ -14,7 +14,6 @@ import asyncio
 import logging
 import shutil
 import uuid
-from collections import defaultdict
 from pathlib import Path
 
 from aiogram import F, Router
@@ -27,28 +26,17 @@ from src.errors import WorkflowError
 from src.onec_order_entry import OneCOrderEntryBot
 from src.order_store import CANCELLED, ENTERED, FAILED, PENDING, OrderStore
 from src.pipeline import run_pipeline, write_audit_log
+from src.rdp_status import is_rdp_connected
 from src.settings import Settings
 from src.summary_formatting import format_order_summary
 from src.telegram_bot import keyboards as kb
 from src.telegram_bot.file_intake import download_order_photo
+from src.telegram_bot.locks import chat_locks as _chat_locks
+from src.telegram_bot.locks import onec_entry_lock as _onec_entry_lock
 from src.telegram_bot.states import OrderFlow
 
 logger = logging.getLogger(__name__)
 router = Router(name="orders")
-
-# aiogram dispatches updates from the same chat as separate concurrent
-# tasks (e.g. Telegram delivers a multi-photo "album" as several updates in
-# quick succession) — without per-chat locking, two receive_photo() calls
-# can both read the FSM's `photos` list before either writes it back,
-# silently dropping one of the photos. One lock per chat_id serializes
-# just the read-modify-write of FSM data for that chat.
-_chat_locks: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
-
-# Only one наряд can physically be typed into 1C at a time — it's a single
-# RDP screen. This serializes confirm_enter() across *all* chats so two
-# operators confirming at the same moment can't interleave keystrokes into
-# the same 1C window.
-_onec_entry_lock = asyncio.Lock()
 
 
 @router.message(Command("cancel"))
@@ -157,6 +145,10 @@ async def confirm_enter(
     record = await order_store.get(order_id)
     if not record or record.status != PENDING:
         await callback.answer("Этот наряд уже обработан или не найден.", show_alert=True)
+        return
+
+    if not settings.onec_dry_run and not is_rdp_connected(settings):
+        await callback.answer("🖥️ Нет связи с 1С по RDP — ввод сейчас невозможен. Попробуй позже.", show_alert=True)
         return
 
     await callback.answer()

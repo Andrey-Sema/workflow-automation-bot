@@ -13,6 +13,7 @@ from src import catalog_admin, config
 from src.errors import AccessDeniedError
 from src.operators_store import OperatorsStore
 from src.order_store import OrderStore
+from src.rdp_status import describe_rdp_status
 from src.settings import Settings
 
 router = Router(name="admin")
@@ -23,19 +24,6 @@ def _require_admin(is_admin: bool) -> None:
         raise AccessDeniedError("Эта команда доступна только администраторам.")
 
 
-def _read_rdp_status(settings: Settings) -> str:
-    status_path = settings.data_dir / ".rdp_status"
-    if not status_path.exists():
-        return "❔ неизвестен (не в Docker или ещё не запускался)"
-    raw = status_path.read_text(encoding="utf-8").strip()
-    icons = {
-        "connected": "✅ подключен",
-        "connecting": "🟡 подключение...",
-        "disabled": "⚪ отключен (RDP_HOST не задан)",
-    }
-    return icons.get(raw, f"🔴 {raw}")
-
-
 @router.message(Command("status"))
 async def cmd_status(message: Message, settings: Settings, order_store: OrderStore) -> None:
     recent = await order_store.recent(limit=5)
@@ -43,7 +31,7 @@ async def cmd_status(message: Message, settings: Settings, order_store: OrderSto
         f"🤖 Каталог: {'✅ загружен' if config.catalog_is_loaded() else '❌ НЕ загружен'} "
         f"({len(config.SERVICES_LIST)} услуг)",
         f"⌨️ Ввод в 1С: {'🧪 dry-run (тест)' if settings.onec_dry_run else '🔴 боевой режим'}",
-        f"🖥️ RDP-сессия: {_read_rdp_status(settings)}",
+        f"🖥️ RDP-сессия: {describe_rdp_status(settings)}",
         "",
         "📋 Последние наряды:",
     ]

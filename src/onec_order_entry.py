@@ -31,7 +31,8 @@ import time
 from dataclasses import dataclass
 from enum import StrEnum
 
-from src.errors import OneCInputError
+from src.errors import OneCInputError, RdpConnectionError
+from src.rdp_status import is_rdp_connected
 from src.settings import Settings, get_settings
 from src.win_1c_bot import click_tab_by_image
 
@@ -174,6 +175,15 @@ class OneCOrderEntryBot:
         bot exists to avoid, so callers should treat any exception here as
         "stop and let a human look at the 1C window".
         """
+        # Blind keystrokes into a screen that isn't actually showing 1C
+        # (RDP dropped, container mid-reconnect, ...) could land anywhere —
+        # a stray "Alt+F4" onto the wrong window is a much worse outcome
+        # than just refusing to type. Dry-run never touches the real
+        # screen, so it's exempt: this check exists purely to protect real
+        # automation.
+        if not self.dry_run and not is_rdp_connected(self.settings):
+            raise RdpConnectionError()
+
         entered: list[str] = []
         categories: list[tuple[OrderCategory, list[dict]]] = [
             (OrderCategory.SERVICES, order_data.get("services", [])),

@@ -1,16 +1,33 @@
 """Unit tests for the pure/testable parts of docker/entrypoint.py (command
-construction, password source precedence). Process supervision itself
-needs a real container and isn't covered here."""
+construction, password source precedence, shutdown sequencing). Process
+supervision itself needs a real container and isn't covered here."""
 
 import importlib.util
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock
+
+import pytest
 
 _ENTRYPOINT_PATH = Path(__file__).resolve().parent.parent / "docker" / "entrypoint.py"
 _spec = importlib.util.spec_from_file_location("docker_entrypoint", _ENTRYPOINT_PATH)
 entrypoint = importlib.util.module_from_spec(_spec)
 sys.modules["docker_entrypoint"] = entrypoint
 _spec.loader.exec_module(entrypoint)
+
+
+@pytest.fixture(autouse=True)
+def _reset_module_state():
+    # entrypoint.py is loaded once (module-level import above) and shared
+    # across every test in this file - reset its mutable globals so tests
+    # can't leak process lists / shutdown flags into each other.
+    entrypoint.children.clear()
+    entrypoint._bot_proc = None
+    entrypoint._shutting_down.clear()
+    yield
+    entrypoint.children.clear()
+    entrypoint._bot_proc = None
+    entrypoint._shutting_down.clear()
 
 
 def test_build_rdp_command_none_without_host(monkeypatch):
@@ -81,3 +98,38 @@ def test_read_rdp_password_missing_file_falls_back_to_env(monkeypatch):
     monkeypatch.setenv("RDP_PASSWORD", "from-env")
 
     assert entrypoint._read_rdp_password() == "from-env"
+
+
+def test_shutdown_signal_terminates_only_bot_when_bot_is_running():
+    """Regression: killing Xvfb/xfreerdp3 at the same moment as the bot
+    process would race the bot's own graceful shutdown (it needs the
+    display alive to finish typing into 1C first). Only the bot should be
+    signaled directly; main()'s tail terminates the rest once the bot
+    actually exits.
+    """
+    fake_xvfb = MagicMock()
+    fake_rdp = MagicMock()
+    fake_bot = MagicMock()
+    entrypoint.children.extend([fake_xvfb, fake_rdp, fake_bot])
+    entrypoint._bot_proc = fake_bot
+
+    entrypoint._handle_signal(15, None)
+
+    fake_bot.terminate.assert_called_once()
+    fake_xvfb.terminate.assert_not_called()
+    fake_rdp.terminate.assert_not_called()
+    assert entrypoint._shutting_down.is_set()
+
+
+def test_shutdown_signal_terminates_everything_if_bot_not_started_yet():
+    """If the signal arrives during Xvfb/RDP startup (before the bot
+    process exists), there's nothing graceful to wait for - tear down
+    whatever did start."""
+    fake_xvfb = MagicMock()
+    fake_rdp = MagicMock()
+    entrypoint.children.extend([fake_xvfb, fake_rdp])
+
+    entrypoint._handle_signal(15, None)
+
+    fake_xvfb.terminate.assert_called_once()
+    fake_rdp.terminate.assert_called_once()

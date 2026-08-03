@@ -155,6 +155,24 @@ async def test_confirm_enter_missing_order_shows_alert(fsm, order_settings, orde
     callback.answer.assert_awaited_once_with("Этот наряд уже обработан или не найден.", show_alert=True)
 
 
+async def test_confirm_enter_refuses_when_rdp_disconnected(fsm, order_store, tmp_path):
+    (tmp_path / ".rdp_status").write_text("disconnected (code 1)", encoding="utf-8")
+    live_settings = Settings(gemini_api_key="dummy", data_dir=tmp_path, onec_dry_run=False)
+
+    order_data = {"deceased": {"fio": "Тест"}, "services": [], "goods": [], "transport": []}
+    summary = build_order_summary(order_data)
+    await order_store.create_pending("ORD1", 42, [], 0, order_data, summary)
+
+    callback = fake_callback(f"{kb.CONFIRM_ENTER_CB}ORD1")
+    await orders.confirm_enter(callback, fsm, live_settings, order_store)
+
+    callback.answer.assert_awaited_once_with(
+        "🖥️ Нет связи с 1С по RDP — ввод сейчас невозможен. Попробуй позже.", show_alert=True
+    )
+    record = await order_store.get("ORD1")
+    assert record.status == "pending_confirmation"  # untouched, safe to retry once RDP is back
+
+
 async def test_confirm_enter_success_moves_files_and_marks_entered(fsm, order_settings, order_store, tmp_path):
     photo = tmp_path / "incoming" / "a.jpg"
     photo.parent.mkdir(parents=True)
@@ -192,10 +210,20 @@ async def test_confirm_enter_failure_keeps_files_and_marks_failed(fsm, order_set
     assert photo.exists()  # left in place for manual review
 
 
-async def test_confirm_enter_serializes_concurrent_1c_entry(fsm, order_settings, order_store, tmp_path):
+async def test_confirm_enter_serializes_concurrent_1c_entry(fsm, order_settings, order_store, tmp_path, monkeypatch):
     """Regression: two orders confirmed at nearly the same moment must
-    never type into 1C concurrently — it's one physical RDP screen."""
+    never type into 1C concurrently — it's one physical RDP screen.
+
+    Uses a fresh Lock instead of the real shared singleton: asyncio.Lock
+    only binds to an event loop when actually contended (see
+    test_bot_shutdown.py's docstring for the full story), and this test
+    deliberately creates contention - reusing the process-wide lock here
+    would leave it bound to this test's (closed) loop and break any later
+    test that also needs real contention on it.
+    """
     import asyncio
+
+    monkeypatch.setattr(orders, "_onec_entry_lock", asyncio.Lock())
 
     order_data = {"deceased": {"fio": "Тест"}, "services": [], "goods": [], "transport": []}
     summary = build_order_summary(order_data)

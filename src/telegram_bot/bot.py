@@ -18,11 +18,37 @@ from src.operators_store import OperatorsStore
 from src.order_store import OrderStore
 from src.settings import get_settings, require_telegram_token
 from src.telegram_bot.handlers import admin, common, orders
+from src.telegram_bot.locks import onec_entry_lock
 from src.telegram_bot.middlewares import AccessControlMiddleware, CorrelationIdMiddleware, ErrorHandlingMiddleware
 
 logger = logging.getLogger(__name__)
 
 HEARTBEAT_PATH_NAME = ".health"
+
+
+async def _wait_for_inflight_onec_entry(timeout: float) -> None:
+    """aiogram's start_polling() stops fetching new updates on SIGTERM/
+    SIGINT but does NOT wait for already-dispatched update handlers to
+    finish (confirmed by reading Dispatcher._polling: each update is an
+    independent asyncio.create_task, never joined on shutdown). Without
+    this, a container stop mid-1C-entry could cut off typing halfway
+    through a наряд with no record of what actually got entered.
+
+    Bounded wait: if nothing finishes in time we still have to let the
+    container stop eventually, but we log as loudly as possible first.
+    """
+    if not onec_entry_lock.locked():
+        return
+    logger.warning(f"⏳ Дожидаюсь завершения текущего ввода в 1С перед остановкой (до {timeout:.0f}с)...")
+    try:
+        async with asyncio.timeout(timeout), onec_entry_lock:
+            pass
+        logger.info("✅ Ввод в 1С завершён, продолжаю остановку.")
+    except TimeoutError:
+        logger.critical(
+            f"🚨 Не дождался завершения ввода в 1С за {timeout:.0f}с — "
+            "контейнер всё равно остановится. ПРОВЕРЬ ОКНО 1С ВРУЧНУЮ перед следующим запуском!"
+        )
 
 
 async def _drain_log_queue_to_chat(bot: Bot, chat_id: int, handler: TelegramQueueHandler) -> None:
@@ -95,6 +121,7 @@ async def run() -> None:
     try:
         await dp.start_polling(bot)
     finally:
+        await _wait_for_inflight_onec_entry(settings.shutdown_grace_seconds)
         for task in background_tasks:
             task.cancel()
         await bot.session.close()

@@ -65,6 +65,12 @@ class Settings(BaseSettings):
     onec_keystroke_delay: float = Field(default=0.03, alias="ONEC_KEYSTROKE_DELAY")
     onec_action_pause: float = Field(default=0.4, alias="ONEC_ACTION_PAUSE")
 
+    # How long, at most, a shutdown (SIGTERM) waits for an in-flight 1C
+    # entry to finish before giving up and closing anyway. Keep
+    # docker-compose's `stop_grace_period` a bit longer than this, or
+    # Docker will SIGKILL before this wait completes.
+    shutdown_grace_seconds: float = Field(default=45.0, alias="SHUTDOWN_GRACE_SECONDS")
+
     # --- Paths ---
     data_dir: Path = Field(default=BASE_DIR / "data", alias="DATA_DIR")
 

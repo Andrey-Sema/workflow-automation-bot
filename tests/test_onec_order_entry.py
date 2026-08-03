@@ -1,6 +1,6 @@
 import pytest
 
-from src.errors import OneCInputError
+from src.errors import OneCInputError, RdpConnectionError
 from src.onec_order_entry import CATEGORY_TAB_MAP, FieldNav, OneCOrderEntryBot, OrderCategory
 from src.settings import Settings
 
@@ -85,3 +85,37 @@ def test_live_mode_calls_pyautogui_in_expected_sequence(monkeypatch):
 def test_category_tab_map_covers_all_categories():
     for category in OrderCategory:
         assert category in CATEGORY_TAB_MAP
+
+
+def test_live_mode_refuses_to_type_when_rdp_disconnected(tmp_path):
+    """Safety gate: never send blind keystrokes when the screen isn't
+    confirmed to actually be showing the 1C RDP session."""
+    (tmp_path / ".rdp_status").write_text("disconnected (code 1)", encoding="utf-8")
+    settings = make_settings(onec_dry_run=False, data_dir=tmp_path)
+    bot = OneCOrderEntryBot(settings=settings)
+
+    with pytest.raises(RdpConnectionError):
+        bot.enter_order({"services": [], "goods": [], "transport": []})
+
+
+def test_live_mode_proceeds_when_rdp_connected(tmp_path, monkeypatch):
+    (tmp_path / ".rdp_status").write_text("connected", encoding="utf-8")
+    settings = make_settings(onec_dry_run=False, data_dir=tmp_path)
+    bot = OneCOrderEntryBot(settings=settings)
+
+    import src.onec_order_entry as mod
+    fake_pyautogui = type("Fake", (), {"write": lambda *a, **k: None, "press": lambda *a, **k: None})()
+    monkeypatch.setattr(mod, "click_tab_by_image", lambda template, confidence: True)
+    monkeypatch.setattr(mod, "pyautogui", fake_pyautogui)
+
+    # No RdpConnectionError raised - reaches real item entry (dry_run=False, but no items to type)
+    entered = bot.enter_order({"services": [], "goods": [], "transport": []})
+    assert entered == []
+
+
+def test_dry_run_ignores_rdp_status(tmp_path):
+    """dry_run never touches the real screen, so it should work even with
+    no RDP status file / a disconnected session."""
+    settings = make_settings(onec_dry_run=True, data_dir=tmp_path)
+    bot = OneCOrderEntryBot(settings=settings)
+    assert bot.enter_order({"services": [], "goods": [], "transport": []}) == []
