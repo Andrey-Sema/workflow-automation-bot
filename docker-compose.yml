@@ -1,0 +1,92 @@
+services:
+  bot:
+    build: .
+    image: workflow-automation-bot:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATA_DIR: /app/data
+    volumes:
+      - ./data:/app/data
+      # Optional: mount a Docker secret instead of RDP_PASSWORD in .env.
+      # - ./secrets/rdp_password:/run/secrets/rdp_password:ro
+    ports:
+      # noVNC live viewer — only actually served when DEBUG_VNC=true (see .env.example)
+      - "6080:6080"
+      # Prometheus /metrics — only meaningfully scraped from inside the
+      # compose network (the prometheus service below); uncomment to also
+      # inspect it from the host directly.
+      # - "9090:9090"
+    shm_size: "1gb"
+    mem_limit: "2g"
+    cpus: "2.0"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    # Longer than Settings.shutdown_grace_seconds (45s default): the bot's
+    # own SIGTERM handler waits for an in-flight 1C entry to finish before
+    # exiting (see src/telegram_bot/bot.py) — if Docker's grace period is
+    # shorter than that wait, it SIGKILLs mid-typing regardless.
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import pathlib,sys,time; p=pathlib.Path('/app/data/.health'); sys.exit(0 if p.exists() and time.time()-float(p.read_text())<90 else 1)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+  # --- Monitoring (optional: `docker compose up -d` starts these too by
+  # default; comment them out, or `docker compose up -d bot`, to skip). ---
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+    mem_limit: "512m"
+    cpus: "0.5"
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+    # Not published to the host by default - reach it via `docker compose
+    # exec` or the Grafana datasource. Uncomment to browse it directly.
+    # ports:
+    #   - "9091:9090"
+
+  grafana:
+    image: grafana/grafana:13.1.1
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      # Change this in .env for anything beyond local/first-look use -
+      # GF_SECURITY_ADMIN_PASSWORD is read from the shell environment, not
+      # baked into the image, so set it in .env rather than editing here.
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    mem_limit: "512m"
+    cpus: "0.5"
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+    ports:
+      - "3000:3000"
+
+volumes:
+  prometheus_data:
+  grafana_data:

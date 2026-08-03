@@ -1,0 +1,30 @@
+.git
+.gitignore
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+.hypothesis
+.mypy_cache
+htmlcov
+.coverage
+coverage.xml
+
+# Runtime-generated / mounted-as-volume at runtime; data/templates/ is the
+# one subfolder actually baked into the image (see Dockerfile).
+data/input
+data/output
+data/processed
+data/logs
+data/debug_screenshots
+data/catalog.json
+data/orders.db
+data/operators.json
+
+tests/
+tools/
+
+.env
+.env.example
+*.md

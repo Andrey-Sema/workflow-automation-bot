@@ -18,6 +18,8 @@ __pycache__/
 *.pyo
 *.pyd
 .pytest_cache/
+.ruff_cache/
+.mypy_cache/
 
 # === Дебаг, логи и скриншоты ===
 *.log
@@ -27,11 +29,19 @@ full_project_code.txt
 # === Данные и базы ===
 *.csv
 data/input/
+data/incoming/
 data/output/
 data/processed/
+data/logs/
+data/operators.json
+data/.health
+data/.rdp_status
 *.sqlite3
 *.db
 data/catalog.json
 
-# Testing
+# Testing / coverage
 .hypothesis/
+.coverage
+htmlcov/
+coverage.xml

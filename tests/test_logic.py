@@ -1,7 +1,9 @@
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
+
 from src import agent_logic
-from src.validator import validate_and_fix_order, Service
+from src.validator import validate_and_fix_order
 
 
 # === ИЗОЛИРУЕМ ТЕСТЫ ОТ РЕАЛЬНОГО КАТАЛОГА ===
@@ -27,6 +29,9 @@ def mock_catalog(monkeypatch):
     monkeypatch.setattr(agent_logic, "SERVICES_LIST", [
         "Катафалк", "Пронос труни", "Послуги священика", "Закопування/опускання труни", "снос"
     ])
+    # find_best_service_name — lru_cache'ится по одному лишь raw_name, поэтому
+    # без сброса между тестами результат может утечь из другого набора SERVICES_LIST.
+    agent_logic.find_best_service_name.cache_clear()
 
 
 # --- ТЕСТЫ МАППИНГА И ТОВАРОВ ---
@@ -60,9 +65,23 @@ def test_goods_math_healing():
 
 def test_fuzzy_matching():
     """Проверка нечеткого поиска по словарю услуг."""
+    agent_logic.find_best_service_name.cache_clear()
     assert agent_logic.find_best_service_name("Ктафалк") == "Катафалк"
     assert agent_logic.find_best_service_name("Пронос") == "Пронос труни"
     assert agent_logic.find_best_service_name("Абсолютно левая дичь") == "Абсолютно левая дичь"
+
+
+def test_substring_matching_handles_abbreviations():
+    """Регресс: "Закопування" должно матчиться на "Закопування/опускання труни"
+    (раньше падало ниже порога difflib 0.6 и оставалось нераспознанным)."""
+    agent_logic.find_best_service_name.cache_clear()
+    assert agent_logic.find_best_service_name("Закопування") == "Закопування/опускання труни"
+    assert agent_logic.find_best_service_name("закопування") == "Закопування/опускання труни"
+
+
+def test_exact_match_is_case_insensitive():
+    agent_logic.find_best_service_name.cache_clear()
+    assert agent_logic.find_best_service_name("катафалк") == "Катафалк"
 
 
 # --- ТЕСТЫ ГЛАВНОГО ПАЙПЛАЙНА БИЗНЕС-ЛОГИКИ ---
@@ -115,18 +134,50 @@ def test_blacklist_logic():
 
 # --- ТЕСТЫ API (MOCKING) ---
 
-@patch("src.agent_logic.client.models.generate_content")
-def test_validate_and_normalize_api_call(mock_generate):
+@patch("src.agent_logic.get_client")
+def test_validate_and_normalize_api_call(mock_get_client):
     """Тест пайплайна без интернета (перехват API нового SDK)."""
     mock_response = MagicMock()
     mock_response.text = '{"services": [{"name": "Снос", "price": 1000, "quantity": 1}]}'
-    mock_generate.return_value = mock_response
+    mock_client = MagicMock()
+    mock_client.models.generate_content.return_value = mock_response
+    mock_get_client.return_value = mock_client
 
     result = agent_logic.validate_and_normalize('Снос - 1000', num_addresses=0, booked_in_1c=[])
 
-    mock_generate.assert_called_once()
+    mock_client.models.generate_content.assert_called_once()
     assert "services" in result
     assert len(result["services"]) == 1
+
+
+def test_validate_and_normalize_prompt_includes_catalog_data():
+    """Регресс: раньше SERVICES_JSON/CEMETERIES_JSON не были определены в
+    agent_logic и промпт падал с NameError при каждом вызове."""
+    with patch("src.agent_logic.get_client") as mock_get_client:
+        mock_response = MagicMock()
+        mock_response.text = '{"services": []}'
+        mock_client = MagicMock()
+        mock_client.models.generate_content.return_value = mock_response
+        mock_get_client.return_value = mock_client
+
+        agent_logic.validate_and_normalize('Снос - 1000', num_addresses=0, booked_in_1c=[])
+
+        _, kwargs = mock_client.models.generate_content.call_args
+        assert "SERVICES DICTIONARY" in kwargs["contents"]
+        assert kwargs["config"].response_mime_type == "application/json"
+
+
+def test_validate_and_normalize_fails_fast_when_circuit_breaker_open():
+    from src.circuit_breaker import gemini_circuit_breaker
+    from src.errors import GeminiUnavailableError
+
+    for _ in range(10):
+        gemini_circuit_breaker.record_failure()
+
+    with patch("src.agent_logic.get_client") as mock_get_client, pytest.raises(GeminiUnavailableError):
+        agent_logic.validate_and_normalize("Снос - 1000", num_addresses=0, booked_in_1c=[])
+
+    mock_get_client.assert_not_called()
 
 
 # --- ТЕСТЫ ВАЛИДАТОРА (PYDANTIC) ---

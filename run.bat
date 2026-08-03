@@ -4,7 +4,8 @@ chcp 65001 >nul
 setlocal enabledelayedexpansion
 
 echo ==========================================
-echo 🤖 Workflow Automation Bot v2.0 | Startup
+echo 🤖 Workflow Automation Bot v3.0 | CLI debug mode
+echo    (primary interface is now the Telegram bot in Docker - see README.md)
 echo ==========================================
 
 :: 1. Проверка: не запущен ли уже бот?

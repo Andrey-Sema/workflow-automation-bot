@@ -1,5 +1,6 @@
-import pyautogui
 import time
+
+import pyautogui
 
 print("У тебя 5 секунд! Наведи мышку точно в центр вкладки 'Склад' в 1С и не двигай...")
 time.sleep(5)

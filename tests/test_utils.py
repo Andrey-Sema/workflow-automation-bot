@@ -1,8 +1,10 @@
-import pytest
-import math
 import json
-from hypothesis import given, strategies as st, assume
-from src.utils import safe_int, clean_service_name, clean_json_response, safe_parse_json
+import math
+
+from hypothesis import assume, given
+from hypothesis import strategies as st
+
+from src.utils import clean_json_response, clean_service_name, safe_int, safe_parse_json
 
 # ==========================================
 # КОНСТАНТЫ ДЛЯ ТЕСТОВ
@@ -20,8 +22,11 @@ def test_safe_int_returns_same_integer(val):
     assert safe_int(val) == val
 
 
-@given(st.integers().filter(lambda x: x > MAX_PG_INT or x < MIN_PG_INT))
+@given(st.integers(max_value=MIN_PG_INT - 1) | st.integers(min_value=MAX_PG_INT + 1))
 def test_safe_int_handles_db_overflow(val):
+    """Generates only out-of-range integers directly instead of filtering
+    st.integers() post-hoc, which Hypothesis's health check flags as too
+    wasteful (and was a source of flaky CI failures)."""
     assert safe_int(val, default=0) == 0
     assert safe_int(val, default=999) == 999
 
@@ -225,7 +230,13 @@ def test_clean_json_response_preserves_valid_json(text):
         original = json.loads(text)
         e_type = 'array' if isinstance(original, list) else 'object'
         cleaned = clean_json_response(text, expected_type=e_type)
-        assert json.loads(cleaned) == original
+        result = json.loads(cleaned)
+        # NaN != NaN by IEEE754 definition; json.loads('NaN') is valid
+        # (Python's non-standard extension), so it needs its own check.
+        if isinstance(original, float) and math.isnan(original):
+            assert isinstance(result, float) and math.isnan(result)
+        else:
+            assert result == original
     except json.JSONDecodeError:
         pass
 

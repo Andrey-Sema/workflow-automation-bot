@@ -1,0 +1,4 @@
+# Only needed for the manual calibration scripts in this folder
+# (calibrate_1c_typing.py) when run natively on Windows outside Docker.
+# The containerized bot does NOT use this file.
+keyboard==0.13.5

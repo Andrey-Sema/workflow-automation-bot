@@ -1,57 +1,78 @@
-import os
-import json
-import time
 import logging
-from typing import Dict, List, Any
-from pathlib import Path
-from functools import lru_cache
+import time
 from difflib import get_close_matches
-from dotenv import load_dotenv # Добавили
+from functools import lru_cache
+from typing import Any
 
-from google import genai
 from google.genai import types
 
+from src import config
+from src.circuit_breaker import gemini_circuit_breaker
+from src.errors import GeminiUnavailableError
+from src.gemini_client import get_client
+from src.metrics import GEMINI_CALL_DURATION, GEMINI_CALLS
 from src.utils import safe_parse_json
-
-# Загружаем переменные, чтобы клиент их увидел
-load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-# Явно передаем ключ из переменной GEMINI_API_KEY
-client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+TEXT_MODEL_NAME = config.TEXT_MODEL_NAME
 
-# ... остальной код без изменений
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-CATALOG_PATH = BASE_DIR / "data" / "catalog.json"
+def _load_from_catalog() -> None:
+    """(Re)derives the module-level catalog snapshots below from
+    `config.CATALOG_DATA` — the single source of truth. Called once at
+    import time and again by `refresh_from_catalog()` after the Telegram
+    admin panel edits catalog.json, so a running process picks up new
+    tariffs/mappings without a restart.
+    """
+    global SERVICES_JSON, CEMETERIES_JSON
+    global DIGGING_RULES, KNOWN_UNIT_PRICES, CATALOG_MAPPING, SERVICES_LIST, TARIFFS
+    SERVICES_JSON = config.SERVICES_JSON
+    CEMETERIES_JSON = config.CEMETERIES_JSON
+    DIGGING_RULES = config.CATALOG_DATA.get("digging_rules", {})
+    KNOWN_UNIT_PRICES = config.CATALOG_DATA.get("known_unit_prices", {})
+    CATALOG_MAPPING = config.CATALOG_DATA.get("catalog_1c_mapping", {})
+    SERVICES_LIST = config.CATALOG_DATA.get("services_list", [])
+    TARIFFS = config.CATALOG_DATA.get("tariffs", {})
 
-try:
-    with open(CATALOG_PATH, "r", encoding="utf-8") as f:
-        CATALOG = json.load(f)
-    logger.info("✅ 1C Catalog successfully loaded into memory.")
-except Exception as e:
-    logger.critical(f"❌ FATAL: Failed to load data/catalog.json! {e}")
-    CATALOG = {}
 
-DIGGING_RULES = CATALOG.get("digging_rules", {})
-KNOWN_UNIT_PRICES = CATALOG.get("known_unit_prices", {})
-CATALOG_MAPPING = CATALOG.get("catalog_1c_mapping", {})
-SERVICES_LIST = CATALOG.get("services_list", [])
-TARIFFS = CATALOG.get("tariffs", {})
+_load_from_catalog()
+
+
+def refresh_from_catalog() -> None:
+    """Call after `config.reload_catalog()` to pick up edits made through
+    the Telegram admin panel (tariffs, digging rules, ...) without
+    restarting the process."""
+    _load_from_catalog()
+    find_best_service_name.cache_clear()
 
 
 @lru_cache(maxsize=128)
 def find_best_service_name(raw_name: str) -> str:
-    """Шукає найбільш схожу назву з офіційного services_list (з кешуванням)."""
+    """Шукає найбільш схожу назву з офіційного services_list (з кешуванням).
+
+    Порядок пошуку: точний збіг → входження підрядка (типово для скорочень
+    на кшталт "Закопування" -> "Закопування/опускання труни") → нечіткий
+    пошук за схожістю рядків.
+    """
     if not SERVICES_LIST or not raw_name:
         return raw_name
+
+    raw_lower = raw_name.lower().strip()
+
+    for candidate in SERVICES_LIST:
+        if candidate.lower() == raw_lower:
+            return candidate
+
+    substring_matches = [c for c in SERVICES_LIST if raw_lower in c.lower() or c.lower() in raw_lower]
+    if substring_matches:
+        return min(substring_matches, key=len)
 
     matches = get_close_matches(raw_name, SERVICES_LIST, n=1, cutoff=0.6)
     return matches[0] if matches else raw_name
 
 
-def _apply_1c_mapping(item: Dict, category_key: str) -> bool:
+def _apply_1c_mapping(item: dict, category_key: str) -> bool:
     """Берет точные данные для вбивания в 1С прямо из подготовленного JSON."""
     mapping_list = CATALOG_MAPPING.get(category_key, [])
     target_price = item.get("unit_price_for_1c", item.get("price", 0))
@@ -66,18 +87,24 @@ def _apply_1c_mapping(item: Dict, category_key: str) -> bool:
     return False
 
 
-def _process_complex_goods_and_mapping(goods: List[Dict], warnings: List[str]):
+def _process_complex_goods_and_mapping(goods: list[dict], warnings: list[str]) -> None:
     for item in goods:
         name_lower = item.get("name", "").lower()
         item.setdefault("1c_down_presses", 0)
 
         category = None
-        if any(kw in name_lower for kw in ["труна", "гроб"]): category = "coffins"
-        elif any(kw in name_lower for kw in ["вінок", "венок"]): category = "wreaths"
-        elif any(kw in name_lower for kw in ["хрест", "крест"]): category = "crosses"
-        elif "корзина" in name_lower: category = "baskets"
-        elif "табличка" in name_lower: category = "plaques"
-        elif any(kw in name_lower for kw in ["рушник", "отче"]): category = "towels"
+        if any(kw in name_lower for kw in ["труна", "гроб"]):
+            category = "coffins"
+        elif any(kw in name_lower for kw in ["вінок", "венок"]):
+            category = "wreaths"
+        elif any(kw in name_lower for kw in ["хрест", "крест"]):
+            category = "crosses"
+        elif "корзина" in name_lower:
+            category = "baskets"
+        elif "табличка" in name_lower:
+            category = "plaques"
+        elif any(kw in name_lower for kw in ["рушник", "отче"]):
+            category = "towels"
 
         if category:
             mapped = _apply_1c_mapping(item, category)
@@ -107,7 +134,7 @@ def _process_complex_goods_and_mapping(goods: List[Dict], warnings: List[str]):
                 item["name"] = find_best_service_name(item["name"])
 
 
-def apply_business_rules_in_python(data: Dict[str, Any], num_addresses: int, booked_in_1c: List[str]) -> Dict[str, Any]:
+def apply_business_rules_in_python(data: dict[str, Any], num_addresses: int, booked_in_1c: list[str]) -> dict[str, Any]:
     services = list(data.get("services", []))
     goods = list(data.get("goods", []))
     transport = list(data.get("transport", []))
@@ -211,7 +238,13 @@ def apply_business_rules_in_python(data: Dict[str, Any], num_addresses: int, boo
     }
 
 
-def validate_and_normalize(raw_json_str: str, num_addresses: int, booked_in_1c: List[str], retries: int = 3) -> Dict[str, Any]:
+def validate_and_normalize(
+    raw_json_str: str, num_addresses: int, booked_in_1c: list[str], retries: int = 3
+) -> dict[str, Any]:
+    if gemini_circuit_breaker.is_open:
+        logger.error("🚨 Circuit breaker открыт: Gemini недавно стабильно падал, пропускаю попытки.")
+        raise GeminiUnavailableError()
+
     prompt = f"""
     You are a strict Data Engineer. Normalize item names in JSON.
     RAW DATA: {raw_json_str}
@@ -219,18 +252,26 @@ def validate_and_normalize(raw_json_str: str, num_addresses: int, booked_in_1c: 
     RULES: 1. FIO -> Title Case. 2. Cemeteries -> Match {CEMETERIES_JSON}. 3. Normalize ONLY 'services'.
     Return ONLY clean JSON.
     """
+    client = get_client()
     for attempt in range(retries):
         try:
-            # Новый синтаксис
+            call_start = time.time()
             response = client.models.generate_content(
                 model=TEXT_MODEL_NAME,
                 contents=prompt,
-                config=types.GenerateContentConfig(temperature=0.0)
+                config=types.GenerateContentConfig(temperature=0.0, response_mime_type="application/json"),
             )
+            GEMINI_CALL_DURATION.labels(agent="logic").observe(time.time() - call_start)
             data = safe_parse_json(response.text, expected_type='object')
             if data:
+                GEMINI_CALLS.labels(agent="logic", outcome="success").inc()
+                gemini_circuit_breaker.record_success()
                 return apply_business_rules_in_python(data, num_addresses, booked_in_1c)
+            GEMINI_CALLS.labels(agent="logic", outcome="error").inc()
+            gemini_circuit_breaker.record_failure()
         except Exception as e:
+            GEMINI_CALLS.labels(agent="logic", outcome="error").inc()
+            gemini_circuit_breaker.record_failure()
             logger.warning(f"⚠️ Попытка {attempt + 1} не удалась: {e}")
             time.sleep(2)
     return {}

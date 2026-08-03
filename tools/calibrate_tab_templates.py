@@ -1,10 +1,19 @@
-import pyautogui
+"""Manual calibration tool: verifies the tab template screenshots
+(data/templates/tab_*.png) still match the live 1C window before relying on
+them in the automated pipeline. Run natively (Windows or against the same
+Xvfb display the bot uses), from the repo root: `python tools/calibrate_tab_templates.py`.
+"""
+
+import sys
 import time
 from pathlib import Path
-from src.win_1c_bot import click_tab_by_image, TEMPLATES_DIR
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from src.win_1c_bot import TEMPLATES_DIR, click_tab_by_image
 
 
-def test_1c_vision():
+def calibrate_tabs():
     print("🔍 Начинаю проверку зрения...")
     print(f"📁 Ищу шаблоны в папке: {TEMPLATES_DIR}")
 
@@ -37,4 +46,4 @@ def test_1c_vision():
 
 
 if __name__ == "__main__":
-    test_1c_vision()
+    calibrate_tabs()
