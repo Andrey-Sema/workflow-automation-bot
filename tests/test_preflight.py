@@ -93,3 +93,22 @@ async def test_run_preflight_passes_end_to_end(tmp_path, monkeypatch):
     bot.get_me.return_value = AsyncMock(username="test_bot")
 
     await run_preflight(settings, bot)  # must not raise
+
+
+def test_check_catalog_loaded_reports_mapping_conflicts(monkeypatch, tmp_path):
+    """Каталог загружен — ещё не значит, что он исправен. Неоднозначный
+    маппинг не падает в рантайме, он вбивает в 1С не ту номенклатуру,
+    поэтому о нём надо сказать на старте, пока логи ещё смотрят."""
+    monkeypatch.setattr(config, "CATALOG_DATA", {
+        "services_list": ["Катафалк"],
+        "catalog_1c_mapping": {
+            "coffins": [
+                {"name": "Труна А", "price": 2700, "search_key": "Труна А", "dropdown_index": 0},
+                {"name": "Труна Б", "price": 2700, "search_key": "Труна Б", "dropdown_index": 0},
+            ]
+        },
+    })
+    settings = Settings(gemini_api_key="dummy", data_dir=tmp_path)
+    warning = check_catalog_loaded(settings)
+    assert warning is not None
+    assert "/catalog_check" in warning

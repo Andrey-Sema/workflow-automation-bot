@@ -47,6 +47,12 @@ def format_order_summary(summary: OrderSummary, *, order_id: str) -> str:
         for name in summary.unmapped_items:
             lines.append(f"  • {escape(name)}")
 
+    if summary.review_items:
+        lines.append("")
+        lines.append("🔍 <b>Сопоставлено только по цене — сверь с бланком:</b>")
+        for name in summary.review_items:
+            lines.append(f"  • {escape(name)}")
+
     if summary.warnings:
         lines.append("")
         lines.append("ℹ️ <b>Автоматически применённые правила:</b>")

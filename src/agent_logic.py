@@ -1,6 +1,7 @@
 import logging
+import re
 import time
-from difflib import get_close_matches
+from difflib import SequenceMatcher, get_close_matches
 from functools import lru_cache
 from typing import Any
 
@@ -18,6 +19,69 @@ logger = logging.getLogger(__name__)
 TEXT_MODEL_NAME = config.TEXT_MODEL_NAME
 
 
+# Goods are routed into a `catalog_1c_mapping` category by keyword, first
+# match wins — so ORDER MATTERS. "Рушник на хрест" deliberately lands in
+# `crosses` rather than `towels` because that's where the real catalog maps
+# it; moving `towels` above `crosses` would silently change which 1C
+# nomenclature line gets typed. Add new categories here (see
+# docs/BUSINESS_LOGIC.md, rule G1).
+# `plaques` MUST stay above `crosses`: a real form line is "Табличка на
+# хрест", which contains both keywords, and it is a plaque — with crosses
+# first it was routed into the crosses list, where no табличка exists, so
+# the line could never map.
+CATEGORY_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("coffins", ("труна", "гроб")),
+    ("wreaths", ("вінок", "венок")),
+    ("baskets", ("корзина",)),
+    ("plaques", ("табличка",)),
+    ("crosses", ("хрест", "крест")),
+    ("towels", ("рушник", "отче", "полотенце")),
+)
+
+# Which mapping category services/transport lines are looked up in.
+SERVICE_MAPPING_CATEGORY = "services"
+
+# Below this name-similarity score a price-ambiguous candidate is refused
+# rather than guessed at: an unmapped line becomes a visible conflict for
+# the operator, while a wrong guess gets typed into 1C silently and there
+# is no undo.
+AMBIGUOUS_NAME_CUTOFF = 0.45
+
+# A price-only match whose name resembles the catalog entry less than this
+# is kept, but marked low-confidence and pushed into the operator's review
+# list. Real orders need both behaviours: "Послуги персоналу для поховання"
+# -> "снос (Галстук)" is a correct mapping that shares no words, while
+# "Насипний пагорб" -> "Перевезення покійного" is pure price coincidence.
+# Nothing in the name or the price tells those two apart — only a human or
+# an `aliases` entry in catalog.json can, so the pipeline maps them and
+# says so instead of pretending to be sure.
+NAME_CONFIDENCE_FLOOR = 0.35
+
+# Kept, but flagged for the operator to eyeball: the name matched well
+# enough to pick between same-priced candidates, just not exactly.
+LOW_CONFIDENCE_REASONS = frozenset({"price_ambiguous_by_name"})
+
+# Last-resort fuzzy matching of a service name against services_list.
+FUZZY_NAME_CUTOFF = 0.8
+FUZZY_TIE_MARGIN = 0.05
+
+_PUNCT_RE = re.compile(r"[^\w\s]+", re.UNICODE)
+
+
+def _norm(name: str) -> str:
+    """Case/whitespace-insensitive form used for all name comparisons."""
+    return " ".join(str(name or "").lower().split())
+
+
+def _norm_loose(name: str) -> str:
+    """Additionally punctuation-insensitive: "снос-ескорт", "снос (ескорт)"
+    and "снос ескорт" all collapse to the same string. Without this,
+    Gemini writing a space where the catalog has a hyphen fell through to
+    the substring pass and matched the *shorter* "снос", quietly dropping
+    the escort surcharge."""
+    return " ".join(_PUNCT_RE.sub(" ", _norm(name)).split())
+
+
 def _load_from_catalog() -> None:
     """(Re)derives the module-level catalog snapshots below from
     `config.CATALOG_DATA` — the single source of truth. Called once at
@@ -25,7 +89,7 @@ def _load_from_catalog() -> None:
     admin panel edits catalog.json, so a running process picks up new
     tariffs/mappings without a restart.
     """
-    global SERVICES_JSON, CEMETERIES_JSON
+    global SERVICES_JSON, CEMETERIES_JSON, PERSONNEL_PACKAGES
     global DIGGING_RULES, KNOWN_UNIT_PRICES, CATALOG_MAPPING, SERVICES_LIST, TARIFFS
     SERVICES_JSON = config.SERVICES_JSON
     CEMETERIES_JSON = config.CEMETERIES_JSON
@@ -34,6 +98,7 @@ def _load_from_catalog() -> None:
     CATALOG_MAPPING = config.CATALOG_DATA.get("catalog_1c_mapping", {})
     SERVICES_LIST = config.CATALOG_DATA.get("services_list", [])
     TARIFFS = config.CATALOG_DATA.get("tariffs", {})
+    PERSONNEL_PACKAGES = config.CATALOG_DATA.get("personnel_packages", {})
 
 
 _load_from_catalog()
@@ -51,63 +116,236 @@ def refresh_from_catalog() -> None:
 def find_best_service_name(raw_name: str) -> str:
     """Шукає найбільш схожу назву з офіційного services_list (з кешуванням).
 
-    Порядок пошуку: точний збіг → входження підрядка (типово для скорочень
-    на кшталт "Закопування" -> "Закопування/опускання труни") → нечіткий
-    пошук за схожістю рядків.
+    Порядок пошуку: точний збіг → збіг без розділових знаків ("снос ескорт"
+    -> "снос-ескорт") → входження підрядка (типово для скорочень на кшталт
+    "Закопування" -> "Закопування/опускання труни") → нечіткий пошук за
+    схожістю рядків.
     """
     if not SERVICES_LIST or not raw_name:
         return raw_name
 
-    raw_lower = raw_name.lower().strip()
+    raw_lower = _norm(raw_name)
 
     for candidate in SERVICES_LIST:
-        if candidate.lower() == raw_lower:
+        if _norm(candidate) == raw_lower:
             return candidate
 
-    substring_matches = [c for c in SERVICES_LIST if raw_lower in c.lower() or c.lower() in raw_lower]
-    if substring_matches:
-        return min(substring_matches, key=len)
+    raw_loose = _norm_loose(raw_name)
+    for candidate in SERVICES_LIST:
+        if _norm_loose(candidate) == raw_loose:
+            return candidate
 
-    matches = get_close_matches(raw_name, SERVICES_LIST, n=1, cutoff=0.6)
-    return matches[0] if matches else raw_name
+    # Two different situations wear the same "substring" shirt and need
+    # opposite tie-breaks:
+    #
+    #   raw ⊂ candidate — the form used an abbreviation ("Закопування" ->
+    #     "Закопування/опускання труни"). The shortest candidate is the
+    #     least-embellished full name, so prefer short.
+    #
+    #   candidate ⊂ raw — one form cell holds several services
+    #     ("Насипний пагорб/Встанов. хреста"). Preferring short here picked
+    #     the most *generic* word in the line: that cell normalized to
+    #     "Хрест" — a physical cross from the goods catalog — and its 1200
+    #     грн then price-matched to "Перевезення покійного", turning a grave
+    #     mound into a corpse transfer. Prefer the longest, most specific
+    #     candidate instead.
+    contains_raw = [c for c in SERVICES_LIST if raw_lower in _norm(c)]
+    if contains_raw:
+        return min(contains_raw, key=len)
+
+    inside_raw = [c for c in SERVICES_LIST if _norm(c) in raw_lower]
+    if inside_raw:
+        return max(inside_raw, key=len)
+
+    # The old 0.6 cutoff was loose enough to rename a line into a different
+    # service: "Автотранспорт для поховання" scored 0.72 against
+    # "Автотранспорт під вінки" purely on their shared 13-character prefix,
+    # and "Закопування" scores 0.667 against "Викопування" — the opposite
+    # operation. A genuine OCR typo scores far higher ("Ктафалк" ->
+    # "Катафалк" is 0.93), so 0.8 keeps the typos and drops the neighbours.
+    matches = get_close_matches(raw_name, SERVICES_LIST, n=2, cutoff=FUZZY_NAME_CUTOFF)
+    if not matches:
+        return raw_name
+
+    # Two near-equal candidates mean the similarity is coming from a shared
+    # prefix rather than from being the same service. Keeping the raw name
+    # leaves a line the operator can recognise; picking one invents a
+    # service they never wrote down.
+    if len(matches) > 1:
+        best, runner_up = (
+            SequenceMatcher(None, raw_lower, _norm(c)).ratio() for c in matches[:2]
+        )
+        if best - runner_up < FUZZY_TIE_MARGIN:
+            return raw_name
+    return matches[0]
 
 
-def _apply_1c_mapping(item: dict, category_key: str) -> bool:
+def _find_mapping_entry(category_key: str, raw_name: str, target_price: int) -> tuple[dict | None, str]:
+    """Picks the one `catalog_1c_mapping` entry a line item refers to.
+
+    Matching is **name-first, price-second**. The original code matched on
+    price alone and took the first hit, which is wrong whenever a category
+    has two items at the same price — and the real catalog has seven such
+    collisions. Concretely: "Отче 350" used to be typed into 1C as "Рушник
+    на фото 350", because that entry happens to sit earlier in the towels
+    list at the same 350 грн.
+
+    Returns `(entry, reason)`; `entry` is None when nothing matched
+    confidently, which leaves the item unmapped and therefore visible as a
+    conflict rather than silently mistyped.
+    """
+    entries = CATALOG_MAPPING.get(category_key) or []
+    if not entries:
+        return None, "no_category"
+
+    norm = _norm(raw_name)
+    loose = _norm_loose(raw_name)
+    price_matches = [e for e in entries if e.get("price") == target_price]
+
+    def score(entry: dict) -> tuple[int, float, int]:
+        entry_norm = _norm(entry.get("name", ""))
+        return (
+            1 if entry.get("price") == target_price else 0,
+            SequenceMatcher(None, norm, entry_norm).ratio(),
+            -len(entry_norm),
+        )
+
+    if norm:
+        exact = [e for e in entries if _norm(e.get("name", "")) == norm]
+        if exact:
+            return max(exact, key=score), "name_exact"
+
+        loose_hits = [e for e in entries if _norm_loose(e.get("name", "")) == loose]
+        if loose_hits:
+            return max(loose_hits, key=score), "name_loose"
+
+        # `aliases` is how the catalog records a mapping that no amount of
+        # string comparison could infer — the form's wording and the 1C
+        # nomenclature simply differ ("Послуги персоналу для поховання" is
+        # entered as "снос (Галстук)"). Ranked by `score`, so several
+        # entries can share an alias and price picks the right variant.
+        alias_hits = [
+            e for e in entries
+            if any(_norm_loose(a) == loose for a in e.get("aliases", []) or [])
+        ]
+        if alias_hits:
+            return max(alias_hits, key=score), "alias"
+
+        # Catalog names carry a trailing gloss — "Отче 350 (Отче 75 Рушник
+        # на крышку гроба)" — so what the form says is typically a substring
+        # of the catalog name. Restrict to the right price bucket when we
+        # have one, so "Отче" can't match "Отче 220" on a 350 грн line.
+        #
+        # A priceless line ("Труна — б/ч", i.e. supplied by the family) has
+        # no bucket to restrict to, and a bare "Труна" is a substring of
+        # over a hundred coffin names. Matching it would pick one of them
+        # essentially at random, so partial matching is off without a price
+        # — an exact name or an alias is still honoured.
+        if target_price > 0:
+            pool = price_matches or entries
+            contained = [
+                e for e in pool
+                if norm in _norm(e.get("name", "")) or _norm(e.get("name", "")) in norm
+            ]
+            if contained:
+                return max(contained, key=score), "name_substring"
+
+    if len(price_matches) == 1:
+        entry = price_matches[0]
+        similarity = SequenceMatcher(None, norm, _norm(entry.get("name", ""))).ratio()
+        if norm and similarity < NAME_CONFIDENCE_FLOOR:
+            return entry, "price_unique_low"
+        return entry, "price_unique"
+
+    if len(price_matches) > 1:
+        best = max(price_matches, key=score)
+        if SequenceMatcher(None, norm, _norm(best.get("name", ""))).ratio() >= AMBIGUOUS_NAME_CUTOFF:
+            return best, "price_ambiguous_by_name"
+        return None, "price_ambiguous"
+
+    return None, "no_match"
+
+
+def _apply_1c_mapping(item: dict, category_key: str, warnings: list[str] | None = None) -> bool:
     """Берет точные данные для вбивания в 1С прямо из подготовленного JSON."""
-    mapping_list = CATALOG_MAPPING.get(category_key, [])
     target_price = item.get("unit_price_for_1c", item.get("price", 0))
+    raw_name = item.get("name", "")
 
-    for cat_item in mapping_list:
-        if cat_item.get("price") == target_price:
-            item["name"] = cat_item["name"]
-            item["1c_search_key"] = cat_item.get("search_key", cat_item["name"])
-            item["1c_down_presses"] = cat_item.get("dropdown_index", 0)
-            return True
+    entry, reason = _find_mapping_entry(category_key, raw_name, target_price)
+    if entry is None:
+        if reason == "price_ambiguous" and warnings is not None:
+            warnings.append(
+                f"❓ '{raw_name}' ({target_price} грн): в каталоге несколько позиций с такой ценой "
+                "и название не подошло ни к одной — впиши в 1С вручную"
+            )
+        return False
 
-    return False
+    # Sharing a price with exactly one catalog line, while sharing no words
+    # with it, is not evidence — it's coincidence until a human says
+    # otherwise. The base order proves both directions at once: "Послуги
+    # персоналу для поховання" -> "снос (Галстук)" is genuinely correct,
+    # and "Насипний пагорб" -> "Перевезення покійного" is a 1200 грн
+    # accident that would have buried a grave-mound line in 1C as a corpse
+    # transfer. Nothing distinguishes them mechanically, so this refuses
+    # both and points at `aliases`, which records the real ones once.
+    if reason == "price_unique_low":
+        if warnings is not None:
+            warnings.append(
+                f"❓ '{raw_name}' ({target_price} грн): по цене подходит '{entry['name']}', "
+                "но названия не похожи — впиши в 1С вручную. Если связка верная, добавь "
+                f"\"aliases\": [\"{raw_name}\"] к этой позиции в catalog.json"
+            )
+        return False
+
+    # A partial name match that lands on a *different* price is almost
+    # always the wrong variant of the right product family, not a discount.
+    # Real case: a form line "Рушник на хрест 380" substring-matches both
+    # "Рушник на хрест 250" and "Рушник на хрест 350" — neither is 380, and
+    # picking either types a wrong nomenclature line into 1C. An exact name
+    # match is exempt: there the operator genuinely repriced a known item.
+    entry_price = entry.get("price", 0)
+    if reason == "name_substring" and target_price and entry_price != target_price:
+        if warnings is not None:
+            warnings.append(
+                f"❓ '{raw_name}' за {target_price} грн: в каталоге похожая позиция "
+                f"'{entry['name']}' стоит {entry_price} грн — цена не совпала, впиши в 1С вручную"
+            )
+        return False
+
+    if not entry.get("search_key"):
+        logger.warning("Позиция '%s' в каталоге без search_key — ввести в 1С автоматически нельзя", entry["name"])
+        return False
+
+    item["name"] = entry["name"]
+    item["1c_search_key"] = entry["search_key"]
+    item["1c_down_presses"] = entry.get("dropdown_index", 0)
+    item["1c_match_reason"] = reason
+
+    if reason in LOW_CONFIDENCE_REASONS:
+        item["1c_match_confidence"] = "low"
+        if warnings is not None:
+            warnings.append(
+                f"🔁 '{raw_name}' ({target_price} грн) сопоставлено ТОЛЬКО по цене как "
+                f"'{entry['name']}' — названия не похожи, проверь перед вводом "
+                "(закрепить связку можно через aliases в catalog.json)"
+            )
+    elif reason == "price_unique" and warnings is not None and _norm(raw_name) != _norm(entry["name"]):
+        warnings.append(f"🔁 '{raw_name}' сопоставлено по цене как '{entry['name']}' — проверь")
+    return True
 
 
 def _process_complex_goods_and_mapping(goods: list[dict], warnings: list[str]) -> None:
     for item in goods:
-        name_lower = item.get("name", "").lower()
+        name_lower = _norm(item.get("name", ""))
         item.setdefault("1c_down_presses", 0)
 
-        category = None
-        if any(kw in name_lower for kw in ["труна", "гроб"]):
-            category = "coffins"
-        elif any(kw in name_lower for kw in ["вінок", "венок"]):
-            category = "wreaths"
-        elif any(kw in name_lower for kw in ["хрест", "крест"]):
-            category = "crosses"
-        elif "корзина" in name_lower:
-            category = "baskets"
-        elif "табличка" in name_lower:
-            category = "plaques"
-        elif any(kw in name_lower for kw in ["рушник", "отче"]):
-            category = "towels"
+        category = next(
+            (cat for cat, keywords in CATEGORY_KEYWORDS if any(kw in name_lower for kw in keywords)),
+            None,
+        )
 
         if category:
-            mapped = _apply_1c_mapping(item, category)
+            mapped = _apply_1c_mapping(item, category, warnings)
             if not mapped:
                 item["name"] = find_best_service_name(item["name"])
         else:
@@ -132,6 +370,69 @@ def _process_complex_goods_and_mapping(goods: list[dict], warnings: list[str]) -
 
             if not healed:
                 item["name"] = find_best_service_name(item["name"])
+
+
+def _apply_personnel_package(service: dict, warnings: list[str]) -> bool:
+    """Decodes a bundled снос/ескорт price into people × per-person tariff.
+
+    `personnel_packages` maps a *total* to a crew: "6200" is 4 people of
+    «снос» at 1550 each. Forms are written both ways — sometimes "снос 4 ×
+    1550", sometimes just "снос 6200" — and until now the second form went
+    into 1C as a single line of 6200 грн, which is not a nomenclature price
+    that exists, so it never matched the catalog.
+
+    Only fires on an exact total match, and only corrects the quantity when
+    it actually disagrees, so a form that already spells out the crew size
+    is left untouched.
+    """
+    if not PERSONNEL_PACKAGES:
+        return False
+
+    package = PERSONNEL_PACKAGES.get(str(service.get("price", 0)))
+    if not package:
+        return False
+
+    qty = int(package.get("qty", 0) or 0)
+    if qty <= 0:
+        return False
+
+    total = service.get("price", 0)
+    if total % qty:
+        logger.warning("Пакет персонала %s не делится на %s чел. — пропускаю", total, qty)
+        return False
+
+    current_qty = service.get("quantity", 1)
+    if current_qty == qty:
+        service["unit_price_for_1c"] = total // qty
+        return False
+
+    service["quantity"] = qty
+    service["unit_price_for_1c"] = total // qty
+    if package.get("name"):
+        service["name"] = package["name"]
+    warnings.append(
+        f"👥 Пакет {total} грн распознан как {package.get('name', 'персонал')} × {qty} чел. "
+        f"по {total // qty} грн (в бланке было {current_qty})"
+    )
+    logger.info("👥 Пакет персонала %s грн -> %s x%s", total, package.get("name"), qty)
+    return True
+
+
+def _map_service_lines(items: list[dict], warnings: list[str]) -> None:
+    """Attaches 1C search keys to services/transport lines.
+
+    `catalog_1c_mapping.services` existed in catalog.json from the start but
+    nothing ever read it — only goods were mapped. The effect was that
+    *every* service and transport line reached `onec_order_entry` without a
+    `1c_search_key`, which that module (correctly) refuses to type, so
+    `OrderSummary.can_auto_enter` was False on every single order. Mapping
+    them here is what makes automatic entry actually reachable.
+    """
+    for item in items:
+        item.setdefault("1c_down_presses", 0)
+        if item.get("1c_search_key"):
+            continue
+        _apply_1c_mapping(item, SERVICE_MAPPING_CATEGORY, warnings)
 
 
 def apply_business_rules_in_python(data: dict[str, Any], num_addresses: int, booked_in_1c: list[str]) -> dict[str, Any]:
@@ -167,7 +468,6 @@ def apply_business_rules_in_python(data: dict[str, Any], num_addresses: int, boo
             warnings.append(f"Удален дубликат из 1С: {s['name']}")
             continue
 
-        raw_qty = s.get("quantity", 1)
         raw_price = s.get("price", 0)
 
         if "закопув" in name_lower and raw_price >= (base_burial_price + min_towel_price):
@@ -186,7 +486,8 @@ def apply_business_rules_in_python(data: dict[str, Any], num_addresses: int, boo
             continue
 
         if any(kw in name_lower for kw in ["снос", "персонал", "ескорт"]):
-            total_staff_count += raw_qty
+            _apply_personnel_package(s, warnings)
+            total_staff_count += max(1, s.get("quantity", 1))
             s["name"] = find_best_service_name(s["name"])
             clean_services.append(s)
             continue
@@ -226,6 +527,8 @@ def apply_business_rules_in_python(data: dict[str, Any], num_addresses: int, boo
             })
 
     _process_complex_goods_and_mapping(goods, warnings)
+    _map_service_lines(clean_services, warnings)
+    _map_service_lines(transport, warnings)
 
     total = sum(svc.get("price", 0) for svc in clean_services)
     total += sum(gd.get("price", 0) for gd in goods)

@@ -46,6 +46,21 @@ def check_catalog_loaded(settings: Settings) -> str | None:
             f"⚠️ {settings.catalog_path} не найден или пуст — бизнес-логика (тарифы, "
             "сопоставление с 1С) не будет работать, пока файла нет. Как появится — /reload_catalog."
         )
+
+    # Loaded is not the same as sound. Ambiguous mappings never raise; they
+    # just make the bot type the wrong 1C line, so say so at boot while
+    # someone is still looking at the logs.
+    report = config.check_catalog()
+    if not report.ok:
+        return (
+            f"⚠️ В каталоге {len(report.errors)} ошибок структуры — часть позиций не будет "
+            "сопоставляться с 1С. Подробности: /catalog_check"
+        )
+    if report.warnings:
+        return (
+            f"⚠️ В каталоге {len(report.warnings)} неоднозначностей (одинаковые цены, "
+            "конфликты dropdown_index). Подробности: /catalog_check"
+        )
     return None
 
 

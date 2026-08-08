@@ -38,6 +38,14 @@ class Service(BaseModel):
     search_key: str = Field(default="", alias="1c_search_key")
     c_down_presses: int = Field(default=0, alias="1c_down_presses")
 
+    # How the catalog match was made, and whether it was a confident one.
+    # Declared here because `model_dump()` only keeps declared fields — an
+    # undeclared key set by agent_logic is silently dropped at validation,
+    # which is what would strip a "check this line" flag on its way to the
+    # operator's summary.
+    match_confidence: str = Field(default="", alias="1c_match_confidence")
+    match_reason: str = Field(default="", alias="1c_match_reason")
+
     @field_validator('price', 'quantity')
     def must_be_positive(cls, v):
         if v < 0:

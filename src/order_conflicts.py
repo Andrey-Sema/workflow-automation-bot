@@ -27,6 +27,7 @@ class OrderSummary:
     sum_diff: int
     missing_birth_date: bool
     unmapped_items: list[str] = field(default_factory=list)
+    review_items: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     services_count: int = 0
     goods_count: int = 0
@@ -34,16 +35,21 @@ class OrderSummary:
 
     @property
     def has_conflicts(self) -> bool:
-        return self.sum_mismatch or self.missing_birth_date or bool(self.unmapped_items)
+        return (
+            self.sum_mismatch
+            or self.missing_birth_date
+            or bool(self.unmapped_items)
+            or bool(self.review_items)
+        )
 
     @property
     def can_auto_enter(self) -> bool:
         """Whether onec_order_entry can attempt every line automatically.
 
         Unmapped items always block full auto-entry (see
-        `OneCOrderEntryBot.enter_item`); a sum mismatch or missing birth
-        date is a data-quality conflict to show the operator but doesn't
-        by itself stop 1C typing.
+        `OneCOrderEntryBot.enter_item`); a sum mismatch, missing birth date
+        or low-confidence match is a data-quality conflict to show the
+        operator but doesn't by itself stop 1C typing.
         """
         return not self.unmapped_items
 
@@ -60,12 +66,15 @@ def build_order_summary(order_data: dict) -> OrderSummary:
         sum_mismatch = abs(handwritten - calculated) > tolerance
 
     unmapped: list[str] = []
+    review: list[str] = []
     services = order_data.get("services", []) or []
     goods = order_data.get("goods", []) or []
     transport = order_data.get("transport", []) or []
     for item in (*services, *goods, *transport):
         if not item.get("1c_search_key"):
             unmapped.append(item.get("name", "?"))
+        elif item.get("1c_match_confidence") == "low":
+            review.append(item.get("name", "?"))
 
     return OrderSummary(
         deceased_fio=deceased.get("fio") or "НЕ УКАЗАНО",
@@ -77,6 +86,7 @@ def build_order_summary(order_data: dict) -> OrderSummary:
         sum_diff=handwritten - calculated,
         missing_birth_date=deceased.get("birth_date") == SENTINEL_BIRTH_DATE,
         unmapped_items=unmapped,
+        review_items=review,
         warnings=list(order_data.get("warnings", [])),
         services_count=len(services),
         goods_count=len(goods),

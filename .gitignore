@@ -38,6 +38,8 @@ data/.health
 data/.rdp_status
 *.sqlite3
 *.db
+# Рабочий каталог не коммитим — его правит /set_tariff в рантайме.
+# Образец data/catalog.sample.json в репозитории есть (см. README).
 data/catalog.json
 
 # Testing / coverage

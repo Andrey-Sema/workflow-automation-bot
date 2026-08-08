@@ -5,6 +5,8 @@ injected by `AccessControlMiddleware`.
 
 from __future__ import annotations
 
+from html import escape
+
 from aiogram import Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
@@ -81,7 +83,44 @@ async def cmd_set_tariff(message: Message, command: CommandObject, is_admin: boo
 async def cmd_reload_catalog(message: Message, is_admin: bool) -> None:
     _require_admin(is_admin)
     catalog_admin.reload_catalog()
-    await message.answer(f"🔄 Каталог перезагружен: {len(config.SERVICES_LIST)} услуг.")
+    report = config.check_catalog()
+    suffix = ""
+    if not report.ok:
+        suffix = f"\n❌ Ошибок в каталоге: {len(report.errors)} — смотри /catalog_check"
+    elif report.warnings:
+        suffix = f"\n⚠️ Замечаний: {len(report.warnings)} — смотри /catalog_check"
+    await message.answer(f"🔄 Каталог перезагружен: {len(config.SERVICES_LIST)} услуг.{suffix}")
+
+
+@router.message(Command("catalog_check"))
+async def cmd_catalog_check(message: Message, is_admin: bool) -> None:
+    """Reports structural errors and mapping ambiguities in catalog.json.
+
+    Worth running after every catalog edit: the problems it lists (two items
+    at one price, one dropdown slot claimed by two names) don't fail loudly
+    at runtime — they make the bot type a confidently wrong nomenclature
+    line into 1C, which has no undo.
+    """
+    _require_admin(is_admin)
+    report = config.check_catalog()
+
+    header = "📖 <b>Проверка каталога</b>"
+    if report.stats:
+        header += (
+            f"\nпозиций: {report.stats.get('mapping_items', 0)} в "
+            f"{report.stats.get('mapping_categories', 0)} категориях · "
+            f"услуг в справочнике: {report.stats.get('services_list', 0)}"
+        )
+    header += f"\nошибок: {len(report.errors)} · предупреждений: {len(report.warnings)}"
+
+    body = escape(report.as_text(limit=25))
+    # Telegram caps a message at 4096 chars; a catalog with many collisions
+    # can blow past that, and a failed send would look like the command
+    # itself is broken.
+    text = f"{header}\n\n<pre>{body}</pre>"
+    if len(text) > 4000:
+        text = f"{header}\n\n<pre>{body[:3500]}\n…</pre>\n(полный отчёт: python -m src.catalog_schema)"
+    await message.answer(text)
 
 
 @router.message(Command("operators"))

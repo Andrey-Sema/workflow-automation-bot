@@ -115,3 +115,73 @@ async def test_cmd_remove_operator_success(operators_store):
     message = fake_message()
     await admin.cmd_remove_operator(message, fake_command("555"), True, operators_store)
     assert 555 not in operators_store.list()
+
+
+# --- /catalog_check ---
+
+async def test_cmd_catalog_check_reports_conflicts(monkeypatch):
+    """Каталог с двумя позициями по одной цене должен сообщить об этом:
+    такие неоднозначности не падают в рантайме, они молча вбивают в 1С
+    не ту номенклатуру."""
+    monkeypatch.setattr(config, "CATALOG_DATA", {
+        "services_list": ["Катафалк"],
+        "catalog_1c_mapping": {
+            "coffins": [
+                {"name": "Труна Економ", "price": 2700, "search_key": "Труна Е", "dropdown_index": 0},
+                {"name": "Труна Хадес", "price": 2700, "search_key": "Труна Х", "dropdown_index": 0},
+            ]
+        },
+    })
+    message = fake_message()
+    await admin.cmd_catalog_check(message, is_admin=True)
+
+    text = message.answer.await_args.args[0]
+    assert "DUPLICATE_PRICE" in text
+    assert "2700" in text
+
+
+async def test_cmd_catalog_check_on_a_clean_catalog(monkeypatch):
+    monkeypatch.setattr(config, "CATALOG_DATA", {"services_list": ["Катафалк"]})
+    message = fake_message()
+    await admin.cmd_catalog_check(message, is_admin=True)
+    assert "ошибок: 0" in message.answer.await_args.args[0]
+
+
+async def test_cmd_catalog_check_requires_admin():
+    with pytest.raises(AccessDeniedError):
+        await admin.cmd_catalog_check(fake_message(), is_admin=False)
+
+
+async def test_cmd_catalog_check_truncates_a_huge_report(monkeypatch):
+    """Telegram обрывает сообщение на 4096 символах — отчёт по каталогу
+    с сотней коллизий не должен превращать команду в ошибку отправки."""
+    monkeypatch.setattr(config, "CATALOG_DATA", {
+        "services_list": ["Катафалк"],
+        "catalog_1c_mapping": {
+            "coffins": [
+                {"name": f"Труна вариант {i} с очень длинным описанием позиции",
+                 "price": 1000, "search_key": "Труна в", "dropdown_index": i}
+                for i in range(80)
+            ]
+        },
+    })
+    message = fake_message()
+    await admin.cmd_catalog_check(message, is_admin=True)
+    assert len(message.answer.await_args.args[0]) <= 4096
+
+
+async def test_cmd_reload_catalog_mentions_conflicts(monkeypatch, admin_settings):
+    monkeypatch.setattr(config, "CATALOG_DATA", {
+        "services_list": ["Катафалк"],
+        "catalog_1c_mapping": {
+            "coffins": [
+                {"name": "Труна А", "price": 100, "search_key": "Труна А", "dropdown_index": 0},
+                {"name": "Труна Б", "price": 100, "search_key": "Труна Б", "dropdown_index": 0},
+            ]
+        },
+    })
+    monkeypatch.setattr(admin.catalog_admin, "reload_catalog", lambda: config.CATALOG_DATA)
+
+    message = fake_message()
+    await admin.cmd_reload_catalog(message, is_admin=True)
+    assert "/catalog_check" in message.answer.await_args.args[0]
