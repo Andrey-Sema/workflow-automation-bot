@@ -1,3 +1,4 @@
+import copy
 import logging
 import re
 import time
@@ -436,9 +437,15 @@ def _map_service_lines(items: list[dict], warnings: list[str]) -> None:
 
 
 def apply_business_rules_in_python(data: dict[str, Any], num_addresses: int, booked_in_1c: list[str]) -> dict[str, Any]:
-    services = list(data.get("services", []))
-    goods = list(data.get("goods", []))
-    transport = list(data.get("transport", []))
+    # Deep copy, not `list(...)`: the shallow copies below share the item
+    # dicts with the caller, so renaming and re-pricing lines here silently
+    # rewrote the caller's data too. Nothing depended on that, but it makes
+    # "run the rules again on the same input" quietly non-reproducible,
+    # which is exactly the property tools/simulate_order.py and the audit
+    # log rely on.
+    services = copy.deepcopy(data.get("services", []) or [])
+    goods = copy.deepcopy(data.get("goods", []) or [])
+    transport = copy.deepcopy(data.get("transport", []) or [])
     warnings = list(data.get("warnings", []))
 
     for category in [services, goods, transport]:
@@ -458,7 +465,15 @@ def apply_business_rules_in_python(data: dict[str, Any], num_addresses: int, boo
     towel_prices = DIGGING_RULES.get("towel_prices", [1400])
     min_towel_price = min(towel_prices) if towel_prices else 1400
 
-    booked_normalized = {" ".join(name.lower().split()) for name in booked_in_1c}
+    # `pipeline.run_pipeline` normalizes booked_in_1c to plain strings
+    # before it ever gets here, but this function is public and typed as
+    # `list[str]` — a future caller passing None entries, dicts, or the
+    # container itself as None (e.g. a hand-rolled CLI invocation) used to
+    # crash with a raw AttributeError/TypeError instead of just treating
+    # the malformed entry as "nothing to deduplicate against".
+    booked_normalized = {
+        " ".join(str(name).lower().split()) for name in (booked_in_1c or []) if name
+    }
 
     for s in services:
         name_lower = s.get("name", "").lower()

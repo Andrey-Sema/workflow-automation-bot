@@ -11,6 +11,7 @@ for: "краткая сводка по ФИО, сумме которая в бл
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 
 SUM_MISMATCH_TOLERANCE_RATIO = 0.01
 SENTINEL_BIRTH_DATE = "01.01.1920"
@@ -26,6 +27,11 @@ class OrderSummary:
     sum_mismatch: bool
     sum_diff: int
     missing_birth_date: bool
+    # Дата смерти позже даты похорон. Раньше это состояние вообще не могло
+    # быть замечено: «щит от галлюцинаций» молча подтягивал год смерти к
+    # текущему и сам же создавал такую пару. Теперь дата сохраняется как в
+    # бланке, а несогласованность показывается оператору.
+    death_after_burial: bool = False
     unmapped_items: list[str] = field(default_factory=list)
     review_items: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
@@ -38,6 +44,7 @@ class OrderSummary:
         return (
             self.sum_mismatch
             or self.missing_birth_date
+            or self.death_after_burial
             or bool(self.unmapped_items)
             or bool(self.review_items)
         )
@@ -52,6 +59,18 @@ class OrderSummary:
         operator but doesn't by itself stop 1C typing.
         """
         return not self.unmapped_items
+
+
+def _death_after_burial(deceased: dict) -> bool:
+    """Хоронить раньше смерти нельзя — такая пара дат означает, что одну из
+    них распознали неверно. Молчит, если хотя бы одна дата отсутствует или
+    записана в неразобранном формате: догадываться тут не о чем."""
+    try:
+        death = datetime.strptime(deceased.get("death_date", ""), "%d.%m.%Y")
+        burial = datetime.strptime(deceased.get("burial_date", ""), "%d.%m.%Y")
+    except (ValueError, TypeError):
+        return False
+    return death > burial
 
 
 def build_order_summary(order_data: dict) -> OrderSummary:
@@ -85,6 +104,7 @@ def build_order_summary(order_data: dict) -> OrderSummary:
         sum_mismatch=sum_mismatch,
         sum_diff=handwritten - calculated,
         missing_birth_date=deceased.get("birth_date") == SENTINEL_BIRTH_DATE,
+        death_after_burial=_death_after_burial(deceased),
         unmapped_items=unmapped,
         review_items=review,
         warnings=list(order_data.get("warnings", [])),

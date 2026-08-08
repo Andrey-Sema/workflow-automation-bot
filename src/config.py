@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import logging
 
-from src.catalog_schema import CatalogReport, validate_catalog
+from src.catalog_schema import CatalogReport, sanitize_catalog, validate_catalog
 from src.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -60,7 +60,9 @@ def _load_catalog() -> dict:
         return {}
 
     _log_catalog_report(validate_catalog(data), path)
-    return data
+    # Публикуем очищенную копию, а не сырую: репортить о битой позиции и
+    # тут же отдать её в agent_logic означало бы падение посреди наряда.
+    return sanitize_catalog(data)
 
 
 def _log_catalog_report(report: CatalogReport, path: object) -> None:
@@ -122,4 +124,4 @@ def load_catalog_from(path) -> dict:
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
     _log_catalog_report(validate_catalog(data), path)
-    return _apply_catalog(data)
+    return _apply_catalog(sanitize_catalog(data))

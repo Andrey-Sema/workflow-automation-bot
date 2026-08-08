@@ -336,6 +336,55 @@ def validate_catalog(data: dict) -> CatalogReport:
     return report
 
 
+def sanitize_catalog(data: dict) -> dict:
+    """Returns a copy of `data` with unusable mapping entries dropped.
+
+    Validation alone was not enough: `config._load_catalog()` reported the
+    problems and then published the *raw* dict anyway, so `agent_logic` still
+    received the broken shapes and died mid-order — `KeyError: 'name'` for an
+    entry with no name, `AttributeError` for a category that is a string
+    instead of a list. Exactly the crash the validator exists to prevent.
+
+    Dropping the bad entries keeps the rest of the catalog usable, which
+    matters operationally: one malformed coffin must not stop the bot from
+    processing the other 280 positions.
+    """
+    if not isinstance(data, dict):
+        return {}
+
+    clean = dict(data)
+    raw_mapping = data.get("catalog_1c_mapping")
+    if not isinstance(raw_mapping, dict):
+        if raw_mapping is not None:
+            logger.error("catalog_1c_mapping не является объектом — секция отброшена целиком")
+            clean.pop("catalog_1c_mapping", None)
+        return clean
+
+    mapping: dict[str, list[dict]] = {}
+    for category, entries in raw_mapping.items():
+        if not isinstance(entries, list):
+            logger.error("Категория '%s' не является списком — отброшена", category)
+            continue
+        kept = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                logger.error("[%s] позиция не является объектом — отброшена: %r", category, entry)
+                continue
+            try:
+                MappingEntry(**entry)
+            except ValidationError as e:
+                logger.error(
+                    "[%s] позиция отброшена (%s): %r",
+                    category, "; ".join(x["msg"] for x in e.errors()), entry.get("name", entry),
+                )
+                continue
+            kept.append(entry)
+        mapping[category] = kept
+
+    clean["catalog_1c_mapping"] = mapping
+    return clean
+
+
 def validate_catalog_file(path) -> CatalogReport:
     report = CatalogReport()
     try:
