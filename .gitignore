@@ -47,3 +47,6 @@ data/catalog.json
 .coverage
 htmlcov/
 coverage.xml
+
+# Артефакты сборки (uv sync ставит проект как editable)
+*.egg-info/

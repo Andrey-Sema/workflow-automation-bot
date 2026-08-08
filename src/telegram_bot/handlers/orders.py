@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import shutil
 import uuid
 from pathlib import Path
@@ -38,6 +39,29 @@ from src.telegram_bot.states import OrderFlow
 logger = logging.getLogger(__name__)
 router = Router(name="orders")
 
+# Everything below treats `callback.data` as untrusted input. It looks like
+# it comes from our own inline keyboards, but nothing stops a Telegram
+# client from sending an arbitrary callback payload for any chat it is in —
+# so the ids and numbers carried in it get validated, not just parsed.
+
+# Order ids are minted as `uuid4().hex[:8].upper()` (see
+# scan_chosen_and_run_pipeline), so anything else is forged or stale.
+_ORDER_ID_RE = re.compile(r"^[0-9A-F]{8}$")
+
+# Matches the choices addresses_keyboard() actually renders.
+MAX_EXTRA_ADDRESSES = 7
+
+# One наряд is a handful of pages. The cap exists because every accepted
+# file is written to disk and later sent to Gemini: without it, a stuck
+# "resend" loop on an operator's phone fills the data volume and burns the
+# API quota with no natural stopping point.
+MAX_PHOTOS_PER_ORDER = 30
+
+
+def _validated_order_id(callback_data: str | None, prefix: str) -> str | None:
+    order_id = (callback_data or "").removeprefix(prefix)
+    return order_id if _ORDER_ID_RE.match(order_id) else None
+
 
 @router.message(Command("cancel"))
 async def cmd_cancel(message: Message, state: FSMContext) -> None:
@@ -60,6 +84,13 @@ async def receive_photo(message: Message, state: FSMContext, settings: Settings)
         data = await state.get_data()
         draft_id = data.get("draft_id") or uuid.uuid4().hex[:10]
         photos = list(data.get("photos", []))
+
+        if len(photos) >= MAX_PHOTOS_PER_ORDER:
+            await message.answer(
+                f"⚠️ В одном наряде не больше {MAX_PHOTOS_PER_ORDER} файлов. "
+                "Жми «Готово» либо /cancel, чтобы начать заново."
+            )
+            return
 
         dest_dir = settings.data_dir / "incoming" / draft_id
         path = await download_order_photo(message.bot, message, dest_dir, settings.telegram_max_file_mb)
@@ -96,7 +127,17 @@ async def photos_done(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(F.data.startswith(kb.ADDRESSES_CB_PREFIX))
 async def addresses_chosen(callback: CallbackQuery, state: FSMContext) -> None:
-    num_addresses = int(callback.data.removeprefix(kb.ADDRESSES_CB_PREFIX))
+    # `int()` on raw callback data accepted anything: "order:addr:999999999"
+    # multiplied straight into the extra-point quantities, producing a наряд
+    # with absurd line totals, and a negative value silently skipped the
+    # surcharge entirely. Only the values the keyboard offers are accepted.
+    raw = callback.data.removeprefix(kb.ADDRESSES_CB_PREFIX)
+    if not raw.isdigit() or not (0 <= int(raw) <= MAX_EXTRA_ADDRESSES):
+        logger.warning("Отклонён некорректный выбор адресов: %r", callback.data)
+        await callback.answer("Некорректный выбор. Нажми кнопку ещё раз.", show_alert=True)
+        return
+    num_addresses = int(raw)
+
     async with _chat_locks[callback.message.chat.id]:
         await state.update_data(num_addresses=num_addresses)
     await callback.message.edit_text(
@@ -221,8 +262,29 @@ async def confirm_cancel(callback: CallbackQuery, state: FSMContext, order_store
 
 
 @router.callback_query(F.data.startswith(kb.SHOW_LOG_CB))
-async def show_log(callback: CallbackQuery, settings: Settings) -> None:
-    order_id = callback.data.removeprefix(kb.SHOW_LOG_CB)
+async def show_log(callback: CallbackQuery, settings: Settings, order_store: OrderStore) -> None:
+    """Sends the raw+final JSON for one order back into the chat that owns it.
+
+    `callback.data` is attacker-controlled — Telegram clients may send any
+    callback payload, not only the ones our keyboards offer — so the order
+    id is validated before it ever reaches the filesystem. Interpolating it
+    straight into a path (as this did) let `order:log:x/../../../catalog`
+    resolve to `/catalog.json` and mail any readable `.json` on the box back
+    to the sender, comfortably inside Telegram's 64-byte callback limit.
+    """
+    order_id = _validated_order_id(callback.data, kb.SHOW_LOG_CB)
+    if order_id is None:
+        await callback.answer("Лог не найден.", show_alert=True)
+        return
+
+    # The order must exist and belong to this chat: order ids are short, and
+    # without this any operator could read another operator's наряд —
+    # including the deceased's and customer's personal data — by guessing.
+    record = await order_store.get(order_id)
+    if record is None or record.chat_id != callback.message.chat.id:
+        await callback.answer("Лог не найден.", show_alert=True)
+        return
+
     log_path = settings.output_dir / f"order_{order_id}.json"
     if not log_path.exists():
         await callback.answer("Лог не найден.", show_alert=True)

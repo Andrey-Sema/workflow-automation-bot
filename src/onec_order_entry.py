@@ -67,7 +67,10 @@ class FieldNav:
 
 try:
     import pyautogui
-except ImportError:  # pragma: no cover - only missing outside the automation container
+except Exception:  # pragma: no cover - only fails outside the automation container
+    # Broader than ImportError on purpose — see the same guard in
+    # src/win_1c_bot.py: headless, pyautogui's import raises KeyError from
+    # mouseinfo rather than ImportError.
     pyautogui = None
 
 

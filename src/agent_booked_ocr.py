@@ -16,7 +16,6 @@ import time
 from datetime import datetime
 from typing import Any
 
-import pyautogui
 from google.genai import types
 
 from src.circuit_breaker import gemini_circuit_breaker
@@ -25,6 +24,16 @@ from src.gemini_client import get_client
 from src.metrics import GEMINI_CALL_DURATION, GEMINI_CALLS
 from src.settings import get_settings
 from src.utils import clean_service_name, safe_int, safe_parse_json
+
+try:
+    import pyautogui
+except Exception:  # pragma: no cover - only fails outside the automation container
+    # Same guard as src/win_1c_bot.py. This module is imported by the
+    # Telegram handlers, so an unguarded import meant a headless start took
+    # the whole bot down at import time — including the parts that never
+    # touch the screen. With pyautogui=None the screenshot call below raises
+    # and is handled like any other capture failure: log and skip the scan.
+    pyautogui = None
 
 logger = logging.getLogger(__name__)
 

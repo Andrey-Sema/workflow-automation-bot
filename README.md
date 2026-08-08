@@ -218,9 +218,13 @@ Telegram access.
 
 - **prometheus** — scrapes the bot every 15s, 30-day retention
   (`monitoring/prometheus.yml`); not published to the host by default.
-- **grafana** — `http://<host>:3000`, admin password from
-  `GRAFANA_ADMIN_PASSWORD` in `.env` (default `admin` — change it). The
-  "Workflow Automation Bot" dashboard is provisioned automatically
+- **grafana** — `http://localhost:3000`, admin password from
+  `GRAFANA_ADMIN_PASSWORD` in `.env`. There is no default: compose refuses to
+  start until it is set, because the port used to be published on every
+  interface with `admin`/`admin`. Both this port and the noVNC one bind to
+  `127.0.0.1` by default (reach them over an SSH tunnel, or set
+  `GRAFANA_BIND` / `VNC_BIND` deliberately). The "Workflow Automation Bot"
+  dashboard is provisioned automatically
   (`monitoring/grafana/dashboards/workflow-bot.json`).
 
 Run only the bot with `docker compose up -d bot` if you don't want the
@@ -235,7 +239,8 @@ monitoring stack.
 | Bot            | aiogram 3.x, aiosqlite (order/session persistence) |
 | Validation     | Pydantic v2, `pydantic-settings` |
 | Automation     | PyAutoGUI + OpenCV (template-match confidence), FreeRDP (`xfreerdp3`), Xvfb |
-| Quality        | ruff, bandit, pytest, pytest-cov, Hypothesis (property-based testing) |
+| Packaging      | uv (locked via `uv.lock`) |
+| Quality        | ruff, bandit, pip-audit, pytest, pytest-cov, Hypothesis (property-based testing) |
 | Monitoring     | prometheus-client, aiohttp (`/metrics`), Prometheus, Grafana |
 | Deployment     | Docker (single image: Xvfb + FreeRDP + bot), docker-compose |
 
@@ -262,6 +267,7 @@ src/
 docker/entrypoint.py                         # Xvfb + FreeRDP supervisor + bot launcher
 monitoring/                                  # Prometheus config + Grafana provisioning/dashboard
 docs/BUSINESS_LOGIC.md                       # every business rule, and where to add new ones
+docs/SECURITY.md                             # security audit: findings, fixes, accepted risks
 data/catalog.sample.json                     # committed copy of the real catalog
 tools/                                       # calibration scripts + simulate_order.py (offline E2E)
 tests/fixtures/                              # three real orders as pipeline fixtures
@@ -270,15 +276,43 @@ tests/                                       # pytest + Hypothesis
 
 ## 🧪 Development
 
-```bash
-python3 -m venv --system-site-packages .venv   # --system-site-packages: see Dockerfile comment on python3-tk
-. .venv/bin/activate
-pip install -r requirements-dev.txt
+Dependencies are managed with [uv](https://docs.astral.sh/uv/); `uv.lock`
+is committed, so CI, the Docker image and your machine resolve to byte-identical
+versions.
 
-ruff check .
-bandit -c pyproject.toml -r src/ main.py docker/
-xvfb-run -a pytest tests/ --cov=src --cov-report=term-missing
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# --system-site-packages: see the Dockerfile comment on python3-tk. uv is
+# configured (pyproject [tool.uv]) never to download its own CPython for the
+# same reason — it must use the OS interpreter that python3-tk was built for.
+uv venv --system-site-packages --python /usr/bin/python3
+uv sync --frozen --group dev
+
+uv run --frozen ruff check .
+uv run --frozen bandit -c pyproject.toml -r src/ main.py docker/
+uv run --frozen pip-audit -r requirements.txt --desc
+xvfb-run -a uv run --frozen pytest tests/ --cov=src --cov-report=term-missing
 ```
+
+Adding or bumping a dependency: edit `[project.dependencies]` (or
+`[dependency-groups] dev`) in `pyproject.toml`, then
+
+```bash
+uv lock
+uv export --frozen --no-dev --no-emit-project --no-hashes -o requirements.txt
+uv export --frozen --group dev --no-emit-project --no-hashes -o requirements-dev.txt
+```
+
+`requirements*.txt` are generated exports kept for environments without uv —
+never edit them by hand.
+
+Tests are pytest plus [Hypothesis](https://hypothesis.readthedocs.io/)
+property tests (`tests/test_properties.py`) covering the money and mapping
+invariants: an order's total always equals the sum of its lines, a line is
+never matched to a catalog entry at a different price, mapping is idempotent,
+and the catalog validator never raises on malformed input. Coverage is ~91%,
+with the money/1C logic at 94–100%; CI fails below 88%.
 
 `--system-site-packages` matters: `pyautogui` imports `mouseinfo`, which
 hard-requires a real `tkinter` binding at import time. `apt install

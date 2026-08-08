@@ -321,12 +321,94 @@ async def test_confirm_cancel_does_not_overwrite_entry_finishing_mid_race(
     assert record.status == ENTERED
 
 
-async def test_show_log_missing_file_shows_alert(order_settings):
+async def test_show_log_missing_file_shows_alert(order_settings, order_store):
     callback = fake_callback(f"{kb.SHOW_LOG_CB}NOPE")
-    await orders.show_log(callback, order_settings)
+    await orders.show_log(callback, order_settings, order_store)
     callback.answer.assert_awaited_once_with("Лог не найден.", show_alert=True)
 
 
 def test_move_photos_to_processed_skips_missing_files(order_settings, caplog):
     orders._move_photos_to_processed(["/no/such/file.jpg"], order_settings)
     assert order_settings.processed_dir.exists()
+
+
+# ============================================================
+# Безопасность: callback_data приходит от клиента, не от нашей клавиатуры.
+# Telegram-клиент может прислать любой payload для чата, в котором состоит.
+# ============================================================
+
+@pytest.mark.parametrize("payload", [
+    "x/../../../../catalog",
+    "../../../../../etc/hostname",
+    "..%2F..%2Fcatalog",
+    "ORD1/../../../operators",
+])
+async def test_show_log_refuses_path_traversal(order_settings, order_store, payload, tmp_path):
+    """Раньше order_id подставлялся в путь как есть: 'order:log:x/../../../catalog'
+    резолвился в /catalog.json, и файл уходил отправителю документом."""
+    secret = tmp_path.parent / "catalog.json"
+    secret.write_text('{"секрет": true}', encoding="utf-8")
+
+    callback = fake_callback(f"{kb.SHOW_LOG_CB}{payload}")
+    await orders.show_log(callback, order_settings, order_store)
+
+    callback.message.answer_document.assert_not_awaited()
+    callback.answer.assert_awaited_once_with("Лог не найден.", show_alert=True)
+
+
+async def test_show_log_refuses_another_chats_order(order_settings, order_store):
+    """Идентификаторы нарядов короткие (8 hex). Без проверки владельца любой
+    оператор мог вытащить чужой наряд с персональными данными покойного."""
+    summary = SimpleNamespace(deceased_fio="Тест", handwritten_total=1, calculated_total=1)
+    await order_store.create_pending("AABBCCDD", 999, [], 0, {}, summary)
+    log = order_settings.output_dir
+    log.mkdir(parents=True, exist_ok=True)
+    (log / "order_AABBCCDD.json").write_text("{}", encoding="utf-8")
+
+    callback = fake_callback(f"{kb.SHOW_LOG_CB}AABBCCDD")  # чат 42, а наряд чата 999
+    await orders.show_log(callback, order_settings, order_store)
+
+    callback.message.answer_document.assert_not_awaited()
+
+
+async def test_show_log_sends_own_order(order_settings, order_store):
+    summary = SimpleNamespace(deceased_fio="Тест", handwritten_total=1, calculated_total=1)
+    await order_store.create_pending("AABBCCDD", 42, [], 0, {}, summary)
+    order_settings.output_dir.mkdir(parents=True, exist_ok=True)
+    (order_settings.output_dir / "order_AABBCCDD.json").write_text("{}", encoding="utf-8")
+
+    callback = fake_callback(f"{kb.SHOW_LOG_CB}AABBCCDD")
+    await orders.show_log(callback, order_settings, order_store)
+
+    callback.message.answer_document.assert_awaited_once()
+
+
+@pytest.mark.parametrize("payload", ["999999999", "-5", "abc", "", "3.5"])
+async def test_addresses_rejects_values_outside_the_keyboard(fsm, payload):
+    """int() на сырых данных принимал что угодно: 999999999 доп. точек
+    множились в количествах позиций наряда, отрицательное молча отключало
+    надбавку."""
+    callback = fake_callback(f"{kb.ADDRESSES_CB_PREFIX}{payload}")
+    await orders.addresses_chosen(callback, fsm)
+
+    assert (await fsm.get_data()).get("num_addresses") is None
+    callback.message.edit_text.assert_not_awaited()
+
+
+@pytest.mark.parametrize("value", [0, 3, orders.MAX_EXTRA_ADDRESSES])
+async def test_addresses_accepts_keyboard_values(fsm, value):
+    callback = fake_callback(f"{kb.ADDRESSES_CB_PREFIX}{value}")
+    await orders.addresses_chosen(callback, fsm)
+    assert (await fsm.get_data())["num_addresses"] == value
+
+
+async def test_photo_cap_stops_unbounded_drafts(fsm, order_settings):
+    """Каждый принятый файл пишется на диск и потом уходит в Gemini —
+    без потолка зациклившаяся отправка забивает том и жжёт квоту."""
+    await fsm.update_data(photos=[f"p{i}.jpg" for i in range(orders.MAX_PHOTOS_PER_ORDER)])
+    message = fake_message(photo=[SimpleNamespace(file_id="f", file_size=10)], document=None)
+
+    await orders.receive_photo(message, fsm, order_settings)
+
+    assert len((await fsm.get_data())["photos"]) == orders.MAX_PHOTOS_PER_ORDER
+    assert "не больше" in message.answer.await_args.args[0]

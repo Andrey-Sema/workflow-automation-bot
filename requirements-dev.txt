@@ -1,9 +1,244 @@
--r requirements.txt
-
+# GENERATED — не редактировать вручную.
+# Источник истины: pyproject.toml + uv.lock.
+# Обновить:  uv export --frozen --group dev --no-emit-project -o requirements-dev.txt
+aiofiles==25.1.0
+    # via aiogram
+aiogram==3.30.0
+    # via workflow-automation-bot
+aiohappyeyeballs==2.7.1
+    # via aiohttp
+aiohttp==3.14.3
+    # via
+    #   aiogram
+    #   workflow-automation-bot
+aiosignal==1.4.0
+    # via aiohttp
+aiosqlite==0.22.1
+    # via workflow-automation-bot
+annotated-types==0.8.0
+    # via pydantic
+anyio==4.14.2
+    # via
+    #   google-genai
+    #   httpx
+attrs==26.1.0
+    # via aiohttp
+bandit==1.9.4
+boolean-py==5.0
+    # via license-expression
+cachecontrol==0.14.4
+    # via pip-audit
+certifi==2026.7.22
+    # via
+    #   aiogram
+    #   httpcore
+    #   httpx
+    #   requests
+cffi==2.1.1 ; platform_python_implementation != 'PyPy'
+    # via cryptography
+charset-normalizer==3.4.9
+    # via requests
+colorama==0.4.6 ; sys_platform == 'win32'
+    # via
+    #   bandit
+    #   pytest
+coverage==7.15.4
+    # via pytest-cov
+cryptography==50.0.0
+    # via google-auth
+cyclonedx-python-lib==9.1.0
+    # via pip-audit
+defusedxml==0.7.1
+    # via py-serializable
+distro==1.9.0
+    # via google-genai
+filelock==3.32.2
+    # via cachecontrol
+frozenlist==1.8.0
+    # via
+    #   aiohttp
+    #   aiosignal
+google-auth==2.56.3
+    # via google-genai
+google-genai==1.75.0
+    # via workflow-automation-bot
+h11==0.16.0
+    # via httpcore
+httpcore==1.0.9
+    # via httpx
+httpx==0.28.1
+    # via google-genai
+hypothesis==6.151.9
+idna==3.18
+    # via
+    #   anyio
+    #   httpx
+    #   requests
+    #   yarl
+iniconfig==2.3.0
+    # via pytest
+license-expression==30.4.4
+    # via cyclonedx-python-lib
+magic-filter==1.0.12
+    # via aiogram
+markdown-it-py==4.2.0
+    # via rich
+mdurl==0.1.2
+    # via markdown-it-py
+mouseinfo==0.1.3
+    # via pyautogui
+msgpack==1.2.1
+    # via cachecontrol
+multidict==6.7.1
+    # via
+    #   aiohttp
+    #   yarl
+numpy==2.2.6
+    # via opencv-python-headless
+opencv-python-headless==4.12.0.88
+    # via workflow-automation-bot
+packageurl-python==0.17.6
+    # via cyclonedx-python-lib
+packaging==26.3
+    # via
+    #   pip-audit
+    #   pip-requirements-parser
+    #   pytest
+pillow==12.3.0
+    # via
+    #   pyscreeze
+    #   workflow-automation-bot
+pip==26.2.1
+    # via pip-api
+pip-api==0.0.34
+    # via pip-audit
+pip-audit==2.9.0
+pip-requirements-parser==32.0.1
+    # via pip-audit
+platformdirs==4.11.1
+    # via pip-audit
+pluggy==1.6.0
+    # via
+    #   pytest
+    #   pytest-cov
+prometheus-client==0.26.0
+    # via workflow-automation-bot
+propcache==0.5.2
+    # via
+    #   aiohttp
+    #   yarl
+py-serializable==2.1.0
+    # via cyclonedx-python-lib
+pyasn1==0.6.4
+    # via pyasn1-modules
+pyasn1-modules==0.4.2
+    # via google-auth
+pyautogui==0.9.54
+    # via workflow-automation-bot
+pycparser==3.0 ; implementation_name != 'PyPy' and platform_python_implementation != 'PyPy'
+    # via cffi
+pydantic==2.12.5
+    # via
+    #   aiogram
+    #   google-genai
+    #   pydantic-settings
+    #   workflow-automation-bot
+pydantic-core==2.41.5
+    # via pydantic
+pydantic-settings==2.14.2
+    # via workflow-automation-bot
+pygetwindow==0.0.9
+    # via pyautogui
+pygments==2.20.0
+    # via
+    #   pytest
+    #   rich
+pymsgbox==2.0.1
+    # via pyautogui
+pymupdf==1.27.2.2
+    # via workflow-automation-bot
+pyobjc-core==12.2.1 ; sys_platform == 'darwin'
+    # via
+    #   pyautogui
+    #   pyobjc-framework-cocoa
+    #   pyobjc-framework-quartz
+pyobjc-framework-cocoa==12.2.1 ; sys_platform == 'darwin'
+    # via pyobjc-framework-quartz
+pyobjc-framework-quartz==12.2.1 ; sys_platform == 'darwin'
+    # via pyautogui
+pyparsing==3.3.2
+    # via pip-requirements-parser
+pyperclip==1.11.0
+    # via
+    #   mouseinfo
+    #   workflow-automation-bot
+pyrect==0.2.0
+    # via pygetwindow
+pyscreeze==1.0.1
+    # via pyautogui
 pytest==9.0.3
+    # via
+    #   pytest-asyncio
+    #   pytest-cov
 pytest-asyncio==1.4.0
 pytest-cov==7.1.0
-hypothesis==6.151.9
-
+python-dotenv==1.2.2
+    # via
+    #   pydantic-settings
+    #   workflow-automation-bot
+python3-xlib==0.15 ; sys_platform == 'linux'
+    # via
+    #   mouseinfo
+    #   pyautogui
+pytweening==1.2.0
+    # via pyautogui
+pyyaml==6.0.3
+    # via bandit
+requests==2.34.2
+    # via
+    #   cachecontrol
+    #   google-auth
+    #   google-genai
+    #   pip-audit
+rich==15.0.0
+    # via
+    #   bandit
+    #   pip-audit
+rubicon-objc==0.5.6 ; sys_platform == 'darwin'
+    # via mouseinfo
 ruff==0.16.1
-bandit==1.9.4
+sniffio==1.3.1
+    # via google-genai
+sortedcontainers==2.4.0
+    # via
+    #   cyclonedx-python-lib
+    #   hypothesis
+stevedore==5.9.0
+    # via bandit
+tenacity==9.1.4
+    # via google-genai
+toml==0.10.2
+    # via pip-audit
+tomli==2.4.1 ; python_full_version <= '3.11'
+    # via coverage
+typing-extensions==4.16.0
+    # via
+    #   aiogram
+    #   aiohttp
+    #   aiosignal
+    #   anyio
+    #   google-genai
+    #   pydantic
+    #   pydantic-core
+    #   pytest-asyncio
+    #   typing-inspection
+typing-inspection==0.4.2
+    # via
+    #   pydantic
+    #   pydantic-settings
+urllib3==2.7.0
+    # via requests
+websockets==16.1.1
+    # via google-genai
+yarl==1.24.5
+    # via aiohttp
