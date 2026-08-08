@@ -68,26 +68,70 @@ original, proven wording.
 
 ## 🗂 Single source of truth: `data/catalog.json`
 
-**Not committed** (gitignored — it's private pricing/business data). All
-service names, tariffs, digging rules and 1C nomenclature mappings come from
-this file; nothing is hardcoded elsewhere. Drop your real file at
-`data/catalog.json` before starting the bot. Structure expected:
+All service names, tariffs, digging rules and 1C nomenclature mappings come
+from this file; nothing is hardcoded elsewhere. The working copy at
+`data/catalog.json` stays gitignored, and **`data/catalog.sample.json` is a
+committed copy of the real catalog** — use it as the reference structure, as
+a test fixture, or as the starting point for a fresh deployment:
+
+```bash
+cp data/catalog.sample.json data/catalog.json
+```
 
 ```json
 {
-  "services_list": ["Катафалк", "..."],
-  "tariffs": {"extra_point": 500, "transport_base": 1000},
-  "digging_rules": {"kopka_person_count": 4, "base_price_per_person": 1600, "towel_prices": [1400]},
+  "tariffs": {"extra_point": 500, "transport_base": 1000, "snos_base": 1550},
+  "digging_rules": {"kopka_person_count": 4, "base_price_per_person": 1925, "towel_prices": [1400]},
+  "personnel_packages": {"6200": {"name": "снос", "qty": 4}},
   "known_unit_prices": {"Хусточки": [40]},
-  "catalog_1c_mapping": {"coffins": [{"name": "...", "price": 0, "search_key": "...", "dropdown_index": 0}]}
+  "catalog_1c_mapping": {
+    "coffins": [{"name": "...", "price": 0, "search_key": "...", "dropdown_index": 0, "aliases": []}]
+  },
+  "services_list": ["Катафалк", "..."]
 }
 ```
+
+**Validate it before trusting it.** Ambiguities in this file don't fail
+loudly — they make the bot type a confidently wrong nomenclature line into
+1C, which has no undo. Two items sharing a price in one category, or one
+dropdown slot claimed by two names, are reported by:
+
+```bash
+python -m src.catalog_schema data/catalog.json     # or /catalog_check in the bot
+```
+
+The same check runs at load time and at startup, so problems land in the log
+rather than in 1C.
+
+**`aliases`** is how you record a mapping no string comparison could infer —
+the form says «Послуги персоналу для поховання», 1C calls it «снос
+(Галстук)». Without one, such a line matches on price alone and is refused
+(see `docs/BUSINESS_LOGIC.md`, rules M3 / M-R2).
 
 Admins can tweak `tariffs`/`digging_rules` at runtime via the bot
 (`/set_tariff`) without restarting; edits are written back to
 `catalog.json` and hot-reloaded (see `src/catalog_admin.py`). Editing
 `services_list` / `catalog_1c_mapping` still means hand-editing the file,
 then `/reload_catalog`.
+
+## 📐 Business rules
+
+Every decision that moves money or reaches 1C is made by deterministic
+Python, not by the model. **`docs/BUSINESS_LOGIC.md` is the full inventory**
+— tariff maths, the digging/towel split, personnel packages, catalog
+matching and every refusal rule, plus where to add new conditions.
+
+Three real orders are committed as fixtures under `tests/fixtures/`
+(personal data replaced, every sum and quantity as written on the form).
+Run any of them through the whole chain offline — no Gemini, no RDP, no 1C:
+
+```bash
+python tools/simulate_order.py tests/fixtures/order_base.json
+python tools/simulate_order.py tests/fixtures/order_vip.json --addresses 2
+```
+
+It prints the per-line mapping, the operator summary, and the exact
+keystroke plan 1C would receive.
 
 ## 🚀 Getting started
 
@@ -131,7 +175,8 @@ argument, so it doesn't show up in `ps aux` inside the container.
    individual typed rows, so review the summary carefully first.
 
 Admin-only: `/status`, `/tariffs`, `/set_tariff <key> <value>`,
-`/reload_catalog`, `/operators`, `/add_operator <id>`, `/remove_operator <id>`.
+`/reload_catalog`, `/catalog_check`, `/operators`, `/add_operator <id>`,
+`/remove_operator <id>`.
 
 ## 🛡 Resilience & safety
 
@@ -173,9 +218,13 @@ Telegram access.
 
 - **prometheus** — scrapes the bot every 15s, 30-day retention
   (`monitoring/prometheus.yml`); not published to the host by default.
-- **grafana** — `http://<host>:3000`, admin password from
-  `GRAFANA_ADMIN_PASSWORD` in `.env` (default `admin` — change it). The
-  "Workflow Automation Bot" dashboard is provisioned automatically
+- **grafana** — `http://localhost:3000`, admin password from
+  `GRAFANA_ADMIN_PASSWORD` in `.env`. There is no default: compose refuses to
+  start until it is set, because the port used to be published on every
+  interface with `admin`/`admin`. Both this port and the noVNC one bind to
+  `127.0.0.1` by default (reach them over an SSH tunnel, or set
+  `GRAFANA_BIND` / `VNC_BIND` deliberately). The "Workflow Automation Bot"
+  dashboard is provisioned automatically
   (`monitoring/grafana/dashboards/workflow-bot.json`).
 
 Run only the bot with `docker compose up -d bot` if you don't want the
@@ -190,7 +239,8 @@ monitoring stack.
 | Bot            | aiogram 3.x, aiosqlite (order/session persistence) |
 | Validation     | Pydantic v2, `pydantic-settings` |
 | Automation     | PyAutoGUI + OpenCV (template-match confidence), FreeRDP (`xfreerdp3`), Xvfb |
-| Quality        | ruff, bandit, pytest, pytest-cov, Hypothesis (property-based testing) |
+| Packaging      | uv (locked via `uv.lock`) |
+| Quality        | ruff, bandit, pip-audit, pytest, pytest-cov, Hypothesis (property-based testing) |
 | Monitoring     | prometheus-client, aiohttp (`/metrics`), Prometheus, Grafana |
 | Deployment     | Docker (single image: Xvfb + FreeRDP + bot), docker-compose |
 
@@ -199,7 +249,8 @@ monitoring stack.
 ```
 src/
   settings.py, errors.py, logging_setup.py   # cross-cutting foundation
-  config.py, catalog_admin.py                # catalog.json load/reload/edit
+  config.py, catalog_admin.py,               # catalog.json load/reload/edit
+    catalog_schema.py                        #   + structural/semantic validation
   gemini_client.py                           # lazy Gemini client factory
   agent_vision.py, agent_logic.py,           # the 3-agent pipeline
     agent_booked_ocr.py, ai_parser.py
@@ -215,21 +266,53 @@ src/
                                              #   sqlite FSM storage, /metrics server
 docker/entrypoint.py                         # Xvfb + FreeRDP supervisor + bot launcher
 monitoring/                                  # Prometheus config + Grafana provisioning/dashboard
-tools/                                       # manual calibration scripts (native OS, not in Docker)
-tests/                                       # pytest + Hypothesis, ~86% coverage on src/
+docs/BUSINESS_LOGIC.md                       # every business rule, and where to add new ones
+docs/SECURITY.md                             # security audit: findings, fixes, accepted risks
+data/catalog.sample.json                     # committed copy of the real catalog
+tools/                                       # calibration scripts + simulate_order.py (offline E2E)
+tests/fixtures/                              # three real orders as pipeline fixtures
+tests/                                       # pytest + Hypothesis
 ```
 
 ## 🧪 Development
 
-```bash
-python3 -m venv --system-site-packages .venv   # --system-site-packages: see Dockerfile comment on python3-tk
-. .venv/bin/activate
-pip install -r requirements-dev.txt
+Dependencies are managed with [uv](https://docs.astral.sh/uv/); `uv.lock`
+is committed, so CI, the Docker image and your machine resolve to byte-identical
+versions.
 
-ruff check .
-bandit -c pyproject.toml -r src/ main.py docker/
-xvfb-run -a pytest tests/ --cov=src --cov-report=term-missing
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# --system-site-packages: see the Dockerfile comment on python3-tk. uv is
+# configured (pyproject [tool.uv]) never to download its own CPython for the
+# same reason — it must use the OS interpreter that python3-tk was built for.
+uv venv --system-site-packages --python /usr/bin/python3
+uv sync --frozen --group dev
+
+uv run --frozen ruff check .
+uv run --frozen bandit -c pyproject.toml -r src/ main.py docker/
+uv run --frozen pip-audit -r requirements.txt --desc
+xvfb-run -a uv run --frozen pytest tests/ --cov=src --cov-report=term-missing
 ```
+
+Adding or bumping a dependency: edit `[project.dependencies]` (or
+`[dependency-groups] dev`) in `pyproject.toml`, then
+
+```bash
+uv lock
+uv export --frozen --no-dev --no-emit-project --no-hashes -o requirements.txt
+uv export --frozen --group dev --no-emit-project --no-hashes -o requirements-dev.txt
+```
+
+`requirements*.txt` are generated exports kept for environments without uv —
+never edit them by hand.
+
+Tests are pytest plus [Hypothesis](https://hypothesis.readthedocs.io/)
+property tests (`tests/test_properties.py`) covering the money and mapping
+invariants: an order's total always equals the sum of its lines, a line is
+never matched to a catalog entry at a different price, mapping is idempotent,
+and the catalog validator never raises on malformed input. Coverage is ~91%,
+with the money/1C logic at 94–100%; CI fails below 88%.
 
 `--system-site-packages` matters: `pyautogui` imports `mouseinfo`, which
 hard-requires a real `tkinter` binding at import time. `apt install

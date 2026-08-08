@@ -27,4 +27,10 @@ tools/
 
 .env
 .env.example
+
+# Docs aren't needed in the image, but pyproject.toml declares
+# `readme = "README.md"` and the Dockerfile COPYs it explicitly for `uv
+# sync` to read project metadata from — excluding it broke the build with
+# "failed to calculate checksum ... README.md: not found" (CopyIgnoredFile).
 *.md
+!README.md

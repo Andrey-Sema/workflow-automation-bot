@@ -25,29 +25,43 @@ jobs:
             python3 python3-venv python3-tk python3-dev build-essential \
             xvfb x11-utils
 
-      - name: Create venv and install Python dependencies
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.8.17"
+          enable-cache: true
+
+      # --system-site-packages so the apt python3-tk stays importable (see
+      # Dockerfile). --frozen fails the build if uv.lock is out of sync with
+      # pyproject.toml, rather than silently resolving something else.
+      - name: Install Python dependencies
         run: |
-          python3 -m venv --system-site-packages .venv
-          . .venv/bin/activate
-          pip install --upgrade pip
-          pip install -r requirements-dev.txt
+          uv venv --system-site-packages --python /usr/bin/python3
+          uv sync --frozen --group dev
 
       - name: Ruff
-        run: |
-          . .venv/bin/activate
-          ruff check .
+        run: uv run --frozen ruff check .
 
       - name: Bandit
-        run: |
-          . .venv/bin/activate
-          bandit -c pyproject.toml -r src/ main.py docker/
+        run: uv run --frozen bandit -c pyproject.toml -r src/ main.py docker/
+
+      # Known CVEs in the resolved dependency tree. Advisories appear between
+      # releases, so this runs against the lockfile on every build rather
+      # than only when dependencies change.
+      # Audits the exported lockfile, not the live environment: the venv is
+      # created with --system-site-packages, so an environment audit also
+      # picks up Ubuntu's own python3-apt, which has no PyPI entry and
+      # aborts the run with "dependency not found on PyPI".
+      - name: pip-audit (dependency CVEs)
+        run: uv run --frozen pip-audit -r requirements.txt --desc
 
       - name: Tests (with coverage)
         env:
           GEMINI_API_KEY: dummy-for-ci
         run: |
-          . .venv/bin/activate
-          xvfb-run -a python3 -m pytest tests/ --cov=src --cov-report=term-missing --cov-report=xml
+          xvfb-run -a uv run --frozen pytest tests/ \
+            --cov=src --cov-report=term-missing --cov-report=xml \
+            --cov-fail-under=88
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4

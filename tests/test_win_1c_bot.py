@@ -154,3 +154,40 @@ def test_confidence_kwarg_does_not_raise_notimplementederror(tmp_path):
     box = pyscreeze.locate(str(needle_path), str(haystack_path), confidence=0.8)
 
     assert box is not None
+
+
+# --- импорт на машине без дисплея ---
+
+def test_pyautogui_import_guard_catches_more_than_importerror():
+    """Регресс: guard ловил только ImportError.
+
+    Когда pyautogui установлен, но дисплея нет, падение происходит внутри
+    его собственного импорта — mouseinfo дёргает os.environ['DISPLAY'] на
+    уровне модуля и кидает KeyError. ImportError-only guard такое не ловил,
+    и процесс умирал на импорте ещё до того, как могла отработать вежливая
+    обработка «pyautogui недоступен» — то есть headless-старт (или окно
+    между запуском Xvfb и готовностью DISPLAY) ронял бота целиком.
+    """
+    import ast
+    from pathlib import Path
+
+    for module in ("win_1c_bot.py", "onec_order_entry.py", "agent_booked_ocr.py"):
+        source = (Path(__file__).resolve().parent.parent / "src" / module).read_text(encoding="utf-8")
+        tree = ast.parse(source)
+
+        guards = [
+            node for node in ast.walk(tree)
+            if isinstance(node, ast.Try)
+            and any(
+                isinstance(stmt, ast.Import) and any(a.name == "pyautogui" for a in stmt.names)
+                for stmt in node.body
+            )
+        ]
+        assert guards, f"{module}: import pyautogui не обёрнут в try/except"
+
+        caught = {
+            handler.type.id
+            for guard in guards for handler in guard.handlers
+            if isinstance(handler.type, ast.Name)
+        }
+        assert "Exception" in caught, f"{module}: guard ловит {caught}, а нужен Exception"

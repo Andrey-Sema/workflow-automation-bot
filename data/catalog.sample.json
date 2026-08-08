@@ -1,0 +1,1859 @@
+{
+  "tariffs": {
+    "extra_point": 500,
+    "transport_base": 1000,
+    "snos_base": 1550,
+    "snos_escort_base": 2400,
+    "snos_zhiletki": 1850
+  },
+  "digging_rules": {
+    "kopka_person_count": 4,
+    "base_price_per_person": 1925,
+    "towel_prices": [
+      1400,
+      2000,
+      2100,
+      3000
+    ]
+  },
+  "personnel_packages": {
+    "6200": {
+      "name": "снос",
+      "qty": 4
+    },
+    "9300": {
+      "name": "снос",
+      "qty": 6
+    },
+    "12400": {
+      "name": "снос",
+      "qty": 8
+    },
+    "9600": {
+      "name": "снос-ескорт",
+      "qty": 4
+    },
+    "14400": {
+      "name": "снос-ескорт",
+      "qty": 6
+    },
+    "19200": {
+      "name": "снос-ескорт",
+      "qty": 8
+    }
+  },
+  "known_unit_prices": {
+    "Хусточки": [
+      40
+    ],
+    "Свічки": [
+      30
+    ]
+  },
+  "catalog_1c_mapping": {
+    "services": [
+        {
+            "name": "снос (Галстук)",
+            "price": 1550,
+            "search_key": "снос",
+            "dropdown_index": 9
+        },
+        {
+            "name": "снос (Жилетки)",
+            "price": 1850,
+            "search_key": "снос",
+            "dropdown_index": 10
+        },
+        {
+            "name": "снос (Почесний Ескорт)",
+            "price": 2400,
+            "search_key": "снос",
+            "dropdown_index": 12
+        },
+      {
+            "name": "Завантаження чи розвантаження - СНОС (1 чол.)",
+            "price": 500,
+            "search_key": "снос",
+            "dropdown_index": 5
+        },
+      {
+            "name": "Персонал (ДОП ТОЧКА/ГОДИНА)",
+            "price": 500,
+            "search_key": "персонал",
+            "dropdown_index": 2
+        },
+      {
+        "name": "Перевезення покійного",
+        "price": 1200,
+        "search_key": "Перевезення",
+        "dropdown_index": 2
+    },
+      {
+        "name": "Доставка(Стандарт)",
+        "price": 850,
+        "search_key": "Доставка (",
+        "dropdown_index": 3
+    }
+    ],
+    "towels": [
+      {
+        "name": "Рушник Льон (Полотенце Лен)",
+        "price": 70,
+        "search_key": "Рушник Л",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Отче 220 (Рушник на крышку гроба-Отче)",
+        "price": 220,
+        "search_key": "Отче",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Рушник на хрест 250 (Рушник на крест 75)",
+        "price": 250,
+        "search_key": "Рушник н",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Рушник на фото 350 (Рушник на фото 120)",
+        "price": 350,
+        "search_key": "Рушник н",
+        "dropdown_index": 3
+      },
+      {
+        "name": "Рушник на хрест 350 (Рушник на крест 120)",
+        "price": 350,
+        "search_key": "Рушник н",
+        "dropdown_index": 4
+      },
+      {
+        "name": "Отче 350 (Отче 75 Рушник на крышку гроба)",
+        "price": 350,
+        "search_key": "Отче",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Комплект рушників 850 (Комплект рушников 300)",
+        "price": 850,
+        "search_key": "Комплект р",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Лляний рушник (4 чел) (опускание закопка)",
+        "price": 1400,
+        "search_key": "Лляний р",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Лляний рушник (6 чел) (опускание закопка)",
+        "price": 2000,
+        "search_key": "Лляний р",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Лляний рушник спец (4 чел) (опускание закопка)",
+        "price": 2100,
+        "search_key": "Лляний р",
+        "dropdown_index": 2
+      },
+      {
+        "name": "Лляний рушник спец (6 чел) (опускание закопка)",
+        "price": 3000,
+        "search_key": "Лляний р",
+        "dropdown_index": 3
+      }
+    ],
+    "plaques": [
+      {
+        "name": "Табличка полімерна 170 (Табличка полимерная 170)",
+        "price": 170,
+        "search_key": "Табличка п",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Табличка (времянка)",
+        "price": 300,
+        "search_key": "Табличка в",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Табличка метал 500 (Табличка метал 500)",
+        "price": 500,
+        "search_key": "Табличка м",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Табличка Vip 650 (Табличка резная Vip)",
+        "price": 650,
+        "search_key": "Табличка V",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Табличка метал с портретом 750 (Табличка метал с портретом 750)",
+        "price": 750,
+        "search_key": "Табличка м",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Табличка дуб VIP 800 (Табличка дубовая VIP)",
+        "price": 800,
+        "search_key": "Табличка д",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Табличка на портрет метал (Табличка на портрет женя)",
+        "price": 1000,
+        "search_key": "Табличка н",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Табличка - полимер гранит (черная)",
+        "price": 1000,
+        "search_key": "Табличка",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Табличка на нозі метал., 1150 (Табл.метл на ноге )",
+        "price": 1150,
+        "search_key": "Табличка н",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Металокераміка - Табличка (16х23см и 18х24см) (табличка метал)",
+        "price": 1460,
+        "search_key": "Металокераміка",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Табличка (мармурова)",
+        "price": 1500,
+        "search_key": "Табличка м",
+        "dropdown_index": 2
+      },
+      {
+        "name": "Табличка на нозі метал АЖУР., (Табличка на нозі метал АЖУР., )",
+        "price": 1650,
+        "search_key": "Табличка н",
+        "dropdown_index": 2
+      }
+    ],
+    "crosses": [
+      {
+        "name": "Хрестик на труну 150 (Крестик на гроб 150)",
+        "price": 150,
+        "search_key": "Хрестик н",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Хрестик на труну 170 (Крестик на гроб 65)",
+        "price": 170,
+        "search_key": "Хрестик н",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Хрестик Вензель матовий (Хрест вензель мат, Медв)",
+        "price": 180,
+        "search_key": "Хрестик В",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Хрестик Вензель металіз (Хрест вензель металлізоіваний)",
+        "price": 200,
+        "search_key": "Хрестик В",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Хрестик на труну католич 240 (Крестик на гроб католическ )",
+        "price": 240,
+        "search_key": "Хрестик н",
+        "dropdown_index": 2
+      },
+      {
+        "name": "Рушник на хрест 250 (Рушник на крест 75)",
+        "price": 250,
+        "search_key": "Рушник н",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Хрестик на труну 260 (Крестик на гроб 250)",
+        "price": 260,
+        "search_key": "Хрестик н",
+        "dropdown_index": 3
+      },
+      {
+        "name": "Хрестик на труну 300 (Крестик на гроб)",
+        "price": 300,
+        "search_key": "Хрестик н",
+        "dropdown_index": 4
+      },
+      {
+        "name": "Рушник на хрест 350 (Рушник на крест 120)",
+        "price": 350,
+        "search_key": "Рушник н",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Хрест економ, 750 (Крест эконом гирун)",
+        "price": 750,
+        "search_key": "Хрест е",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Хрест Катол ромашка Суми (Крест Катол ромашка Сумы)",
+        "price": 800,
+        "search_key": "Хрест К",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Хрест Дерев. 1 перекл., 970 (Крест 1 перекл фонтанка)",
+        "price": 970,
+        "search_key": "Хрест Д",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Хрест Дерев. різьблений, 1000 (Кр деш резной ваня)",
+        "price": 1000,
+        "search_key": "Хрест Д",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Хрест Дерев. 2 перекл. 1050 (Крест 2 перек. фонтанка)",
+        "price": 1050,
+        "search_key": "Хрест Д",
+        "dropdown_index": 2
+      },
+      {
+        "name": "Хрест дешевий, 1380 (Крест дешевый 6к мал сумы)",
+        "price": 1380,
+        "search_key": "Хрест д",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Хрест ІНЦІ Малий 1400 (крест инци мал (фаска) сум спічка)",
+        "price": 1400,
+        "search_key": "Хрест І",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Покривало Хрести 1420 (Покрывало ПН 8)",
+        "price": 1420,
+        "search_key": "Покривало Х",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Хрест Катол Суми (Крест Катол сумы)",
+        "price": 1500,
+        "search_key": "Хрест К",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Хрест Бублик 1510 (2 перем сумы ромаш мал)",
+        "price": 1510,
+        "search_key": "Хрест Б",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Хрест Сновянка 1520 (Хрест Сновянка )",
+        "price": 1520,
+        "search_key": "Хрест С",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Хрест Вічна пам'ять 1560 (Крест вечная память сумы к-1100)",
+        "price": 1560,
+        "search_key": "Хрест В",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Хрест Дерево ІНЦІ, 1570 (Крест дерево ИНЦІсумы к1100)",
+        "price": 1570,
+        "search_key": "Хрест Д",
+        "dropdown_index": 3
+      },
+      {
+        "name": "Хрест Ікона нова, 1620 (Крест икона новая (сумы))",
+        "price": 1620,
+        "search_key": "Хрест І",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Хрест Метал дитячий 1600",
+        "price": 1690,
+        "search_key": "Хрест М",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Хрест Металевий 1700 (диам. 32 бел)",
+        "price": 1700,
+        "search_key": "Хрест М",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Хрест Бублик Великий 1710 (Крест Ника, сумы)",
+        "price": 1710,
+        "search_key": "Хрест Б",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Хрест Дуб 2100 (Крест дуб ст Сум)",
+        "price": 2100,
+        "search_key": "Хрест Д",
+        "dropdown_index": 4
+      },
+      {
+        "name": "Хрест Метал Троянда 2200 (30 * 30 роза)",
+        "price": 2200,
+        "search_key": "Хрест М",
+        "dropdown_index": 2
+      },
+      {
+        "name": "Хрест Дуб 2260 (Крест Дуб буб Сум)",
+        "price": 2260,
+        "search_key": "Хрест Д",
+        "dropdown_index": 5
+      },
+      {
+        "name": "Покривало Парча Хрест камінці 2340 (Покрывало ПН 20)",
+        "price": 2340,
+        "search_key": "Покривало П",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Хрест Метал Ажур 2600 (Крест \"Метал ажур\")",
+        "price": 2600,
+        "search_key": "Хрест М",
+        "dropdown_index": 3
+      },
+      {
+        "name": "Хрест Слов'янський (Крест женя)",
+        "price": 2750,
+        "search_key": "Хрест С",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Хрест ротанг (Хрест ротанг (мет))",
+        "price": 3600,
+        "search_key": "Хрест р",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Хрест Ромб (Крест ромб женя)",
+        "price": 3950,
+        "search_key": "Хрест Р",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Хрест Дуб (8ка) (Хрест Дуб (8ка) )",
+        "price": 4000,
+        "search_key": "Хрест Д",
+        "dropdown_index": 6
+      },
+      {
+        "name": "Хрест католлик 4600 (Хрест католлик 4600 гриценко)",
+        "price": 4600,
+        "search_key": "Хрест к",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Хрест Ясень Залізні літери (гриценко, чп)",
+        "price": 5300,
+        "search_key": "Хрест Я",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Хрест дерево 5400 (Хрест раптор гриценко)",
+        "price": 5400,
+        "search_key": "Хрест д",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Хрест Квадрат дерев. (Крест квадрат женя)",
+        "price": 5800,
+        "search_key": "Хрест К",
+        "dropdown_index": 2
+      },
+      {
+        "name": "Хрест Дуб (10ка) (Хрест Дуб (10ка) гриц)",
+        "price": 6000,
+        "search_key": "Хрест Д",
+        "dropdown_index": 7
+      },
+      {
+        "name": "Хрест Квадрат білий (Крест малый резной фонт)",
+        "price": 6100,
+        "search_key": "Хрест К",
+        "dropdown_index": 3
+      },
+      {
+        "name": "Хрест клевер (Крест Инці лист женя)",
+        "price": 6500,
+        "search_key": "Хрест к",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Хрест Дуб (12ка) (Хрест Дуб (12ка) гриц)",
+        "price": 8000,
+        "search_key": "Хрест Д",
+        "dropdown_index": 8
+      },
+      {
+        "name": "Хрест Ясень куб (кест ясень куб гриц)",
+        "price": 8700,
+        "search_key": "Хрест Я",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Хрест Дуб троянда (Крест лист, роза дуб гриц)",
+        "price": 10800,
+        "search_key": "Хрест Д",
+        "dropdown_index": 9
+      },
+      {
+        "name": "Хрест Дуб Різьблений (Женя)",
+        "price": 11000,
+        "search_key": "Хрест Д",
+        "dropdown_index": 10
+      },
+      {
+        "name": "Хрест Ясень різьбл (Крест -Дуб гриц)",
+        "price": 12000,
+        "search_key": "Хрест Я",
+        "dropdown_index": 2
+      },
+      {
+        "name": "Хрест армянський (Хрест армянський грицено)",
+        "price": 14000,
+        "search_key": "Хрест а",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Хрест Дуб, розп'яття (Хрест распятие Иисус гриц)",
+        "price": 36000,
+        "search_key": "Хрест Д",
+        "dropdown_index": 11
+      },
+      {
+        "name": "Хрест Дуб Христове розп'яття (Крест дуб распятие иисус )",
+        "price": 38000,
+        "search_key": "Хрест Д",
+        "dropdown_index": 12
+      }
+    ],
+    "baskets": [
+      {
+        "name": "Корзина (№ 9/2) Южне 725",
+        "price": 725,
+        "search_key": "Корзина",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Корзина (№ 13/2) Южне 730",
+        "price": 730,
+        "search_key": "Корзина",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Корзина 5/1 Южный (иисус комби)",
+        "price": 750,
+        "search_key": "Корзина",
+        "dropdown_index": 2
+      },
+      {
+        "name": "Корзина (№ 8/2) Южне 960",
+        "price": 960,
+        "search_key": "Корзина",
+        "dropdown_index": 3
+      },
+      {
+        "name": "Корзина №19 Южне 1250",
+        "price": 1250,
+        "search_key": "Корзина",
+        "dropdown_index": 4
+      },
+      {
+        "name": "Корзина (№ 13) Южный 1400",
+        "price": 1400,
+        "search_key": "Корзина",
+        "dropdown_index": 5
+      },
+      {
+        "name": "Корзина 1720",
+        "price": 1720,
+        "search_key": "Корзина",
+        "dropdown_index": 6
+      },
+      {
+        "name": "Корзина серце (№ 1/1) Южне 1830",
+        "price": 1830,
+        "search_key": "Корзина с",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Корзина Южне (№18) 1860",
+        "price": 1860,
+        "search_key": "Корзина Ю",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Корзина 1900",
+        "price": 1900,
+        "search_key": "Корзина",
+        "dropdown_index": 7
+      },
+      {
+        "name": "Корзина №19в Южне 1905",
+        "price": 1905,
+        "search_key": "Корзина в",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Корзина 2100",
+        "price": 2100,
+        "search_key": "Корзина",
+        "dropdown_index": 8
+      },
+      {
+        "name": "Корзина човен S (света)",
+        "price": 2160,
+        "search_key": "Корзина ч",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Корзина S покупна 2880 (Света малая корзина)",
+        "price": 2880,
+        "search_key": "Корзина S",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Корзина 3050",
+        "price": 3050,
+        "search_key": "Корзина",
+        "dropdown_index": 9
+      },
+      {
+        "name": "Корзина 3230",
+        "price": 3230,
+        "search_key": "Корзина",
+        "dropdown_index": 10
+      },
+      {
+        "name": "Корзина нова 3240",
+        "price": 3240,
+        "search_key": "Корзина н",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Корзина оксамит 3460 (житомир)",
+        "price": 3460,
+        "search_key": "Корзина о",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Корзина оксамит 3590",
+        "price": 3590,
+        "search_key": "Корзина о",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Корзина S покупна 5050 (Света большая корзина)",
+        "price": 5050,
+        "search_key": "Корзина S",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Корзина нова вінтова 6000 (наша корзина)",
+        "price": 6000,
+        "search_key": "Корзина н",
+        "dropdown_index": 1
+      }
+    ],
+    "wreaths": [
+      {
+        "name": "Вінок (2/1) Южне 350",
+        "price": 350,
+        "search_key": "Вінок",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Вінок (№ 4 У) Южне 400",
+        "price": 400,
+        "search_key": "Вінок",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Вінок 420 (на к-480)",
+        "price": 420,
+        "search_key": "Вінок",
+        "dropdown_index": 2
+      },
+      {
+        "name": "Вінок 490 (на к-480)",
+        "price": 490,
+        "search_key": "Вінок",
+        "dropdown_index": 3
+      },
+      {
+        "name": "Вінок (№ 5/1) Южне 530",
+        "price": 530,
+        "search_key": "Вінок",
+        "dropdown_index": 4
+      },
+      {
+        "name": "Вінок 9/О Южне 580 (атлас)",
+        "price": 580,
+        "search_key": "Вінок О",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Венок (№ 8) Южный 620",
+        "price": 620,
+        "search_key": "Венок",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Вінок Ромашка 710",
+        "price": 710,
+        "search_key": "Вінок Р",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Вінок Серце мале Южне 740",
+        "price": 740,
+        "search_key": "Вінок С",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Вінок (№ 9 У) Южне 755",
+        "price": 755,
+        "search_key": "Вінок",
+        "dropdown_index": 5
+      },
+      {
+        "name": "Вінок 760",
+        "price": 760,
+        "search_key": "Вінок",
+        "dropdown_index": 6
+      },
+      {
+        "name": "Вінок 880",
+        "price": 880,
+        "search_key": "Вінок",
+        "dropdown_index": 7
+      },
+      {
+        "name": "Вінок (№ 9/1) Южне 940",
+        "price": 940,
+        "search_key": "Вінок",
+        "dropdown_index": 8
+      },
+      {
+        "name": "Вінок (№ 13/1) Южне 990",
+        "price": 990,
+        "search_key": "Вінок",
+        "dropdown_index": 9
+      },
+      {
+        "name": "Вінок 1120 (Венок (рыбка больш к-1040,810)",
+        "price": 1120,
+        "search_key": "Вінок",
+        "dropdown_index": 10
+      },
+      {
+        "name": "Вінок S малий 1200 (новій, Света)",
+        "price": 1200,
+        "search_key": "Вінок S",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Вінок (№ 10,11) Южне 1370",
+        "price": 1370,
+        "search_key": "Вінок",
+        "dropdown_index": 11
+      },
+      {
+        "name": "Вінок 1390",
+        "price": 1390,
+        "search_key": "Вінок",
+        "dropdown_index": 12
+      },
+      {
+        "name": "Вінок 1440",
+        "price": 1440,
+        "search_key": "Вінок",
+        "dropdown_index": 13
+      },
+      {
+        "name": "Вінок 1490",
+        "price": 1490,
+        "search_key": "Вінок",
+        "dropdown_index": 14
+      },
+      {
+        "name": "Вінок свічка (№ 1) Южне 1510",
+        "price": 1510,
+        "search_key": "Вінок с",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Вінок 1550 (Венок Мальва)",
+        "price": 1550,
+        "search_key": "Вінок",
+        "dropdown_index": 15
+      },
+      {
+        "name": "Вінок 1630",
+        "price": 1630,
+        "search_key": "Вінок",
+        "dropdown_index": 16
+      },
+      {
+        "name": "Вінок (№ 10/1,11/1) Южне 1740",
+        "price": 1740,
+        "search_key": "Вінок",
+        "dropdown_index": 17
+      },
+      {
+        "name": "Вінок свічка (№ 3) Южне 1855",
+        "price": 1855,
+        "search_key": "Вінок с",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Вінок (№ 6/1) Южне 1875",
+        "price": 1875,
+        "search_key": "Вінок",
+        "dropdown_index": 18
+      },
+      {
+        "name": "Вінок (№ 12/1) Южне 1925",
+        "price": 1925,
+        "search_key": "Вінок",
+        "dropdown_index": 19
+      },
+      {
+        "name": "Вінок Южне (№12/2 дор)",
+        "price": 1990,
+        "search_key": "Вінок Ю",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Вінок (№ 14, 14/1) Южне 1995 (метал)",
+        "price": 1995,
+        "search_key": "Вінок",
+        "dropdown_index": 20
+      },
+      {
+        "name": "Вінок S покупний 2330 (Света, малый)",
+        "price": 2330,
+        "search_key": "Вінок S",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Вінок 2340",
+        "price": 2340,
+        "search_key": "Вінок",
+        "dropdown_index": 21
+      },
+      {
+        "name": "Вінок S покупний 2640 (Света, большой)",
+        "price": 2640,
+        "search_key": "Вінок S",
+        "dropdown_index": 2
+      },
+      {
+        "name": "Вінок (ВГ №1, ВГ №2) Южне 2680 (атлас Веч пам)",
+        "price": 2680,
+        "search_key": "Вінок В",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Вінок новий 2760",
+        "price": 2760,
+        "search_key": "Вінок н",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Вінок S серце мале (Света)",
+        "price": 3180,
+        "search_key": "Вінок S",
+        "dropdown_index": 3
+      },
+      {
+        "name": "Вінок Прапор (Флаг)",
+        "price": 3320,
+        "search_key": "Вінок П",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Вінок новий серце 4080",
+        "price": 4080,
+        "search_key": "Вінок н",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Вінок N покупний 4140 (Нина маленькая ріба)",
+        "price": 4140,
+        "search_key": "Вінок N",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Вінок новий 4200",
+        "price": 4200,
+        "search_key": "Вінок н",
+        "dropdown_index": 2
+      },
+      {
+        "name": "Вінок 4310",
+        "price": 4310,
+        "search_key": "Вінок",
+        "dropdown_index": 22
+      },
+      {
+        "name": "Вінок новий ГЕРБ 4550 (каркас герб)",
+        "price": 4550,
+        "search_key": "Вінок н",
+        "dropdown_index": 3
+      },
+      {
+        "name": "Вінок S серце 4800 (Света)",
+        "price": 4800,
+        "search_key": "Вінок S",
+        "dropdown_index": 4
+      },
+      {
+        "name": "Вінок новий 4920 (губернатор)",
+        "price": 4920,
+        "search_key": "Вінок н",
+        "dropdown_index": 4
+      },
+      {
+        "name": "Вінок 5030",
+        "price": 5030,
+        "search_key": "Вінок",
+        "dropdown_index": 23
+      },
+      {
+        "name": "Вінок S покупний 5090 (Света гигант)",
+        "price": 5090,
+        "search_key": "Вінок S",
+        "dropdown_index": 5
+      },
+      {
+        "name": "Вінок новий Серце 5520 (металеві ноги)",
+        "price": 5520,
+        "search_key": "Вінок н",
+        "dropdown_index": 5
+      },
+      {
+        "name": "Вінок прапор серед. 5580",
+        "price": 5580,
+        "search_key": "Вінок п",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Вінок Прапор Великий 6120",
+        "price": 6120,
+        "search_key": "Вінок П",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Вінок оксамит 6300",
+        "price": 6300,
+        "search_key": "Вінок о",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Вінок Адмирал (Венок 3600 искусств.)",
+        "price": 10500,
+        "search_key": "Вінок А",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Вінок оксамит Адмірал",
+        "price": 12600,
+        "search_key": "Вінок о",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Вінок Президент (5200)",
+        "price": 19000,
+        "search_key": "Вінок П",
+        "dropdown_index": 2
+      },
+      {
+        "name": "Вінок оксамит Серце мале",
+        "price": 23300,
+        "search_key": "Вінок о",
+        "dropdown_index": 2
+      },
+      {
+        "name": "Вінок оксамит Президент",
+        "price": 25100,
+        "search_key": "Вінок о",
+        "dropdown_index": 3
+      },
+      {
+        "name": "Вінок Серце",
+        "price": 34100,
+        "search_key": "Вінок С",
+        "dropdown_index": 1
+      }
+    ],
+    "coffins": [
+      {
+        "name": "Труна Необбита",
+        "price": 1500,
+        "search_key": "Труна Н",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Труна Черкаси дитяча 0,8-1,0 м",
+        "price": 1710,
+        "search_key": "Труна Ч",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Труна Шовк Соц. (Біляївка)",
+        "price": 2100,
+        "search_key": "Труна Ш",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Труна Дитяча Атлас 0,8 м",
+        "price": 2200,
+        "search_key": "Труна Д",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Труна Хадес дитячий 0,8 м (горіх, біла)",
+        "price": 2700,
+        "search_key": "Труна Х",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Труна Економ (Эконом)",
+        "price": 2700,
+        "search_key": "Труна Е",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Труна Хадес дитяча 1,0 м (Хадес детский)",
+        "price": 3000,
+        "search_key": "Труна Х",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Труна Хадес дитяча 1,2 м",
+        "price": 3240,
+        "search_key": "Труна Х",
+        "dropdown_index": 2
+      },
+      {
+        "name": "Труна Шовк",
+        "price": 3250,
+        "search_key": "Труна Ш",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Труна Дитяча Атлас 1-1,5 м",
+        "price": 3550,
+        "search_key": "Труна Д",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Труна Атлас",
+        "price": 3650,
+        "search_key": "Труна А",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Труна Дитяча Велюр 1-1,5 м (Гроб детский велюр 1-1,5м)",
+        "price": 3650,
+        "search_key": "Труна Д",
+        "dropdown_index": 2
+      },
+      {
+        "name": "Труна Велюр",
+        "price": 3900,
+        "search_key": "Труна В",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Труна Тернопіль дитячий 0,80 - 1,0 (ровно/тернополь)",
+        "price": 4100,
+        "search_key": "Труна Т",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Труна Шовк СПЕЦ (від 1,6м)",
+        "price": 4800,
+        "search_key": "Труна Ш",
+        "dropdown_index": 2
+      },
+      {
+        "name": "Труна Тернопіль  дитячий 1,2 м (ровно/тернополь)",
+        "price": 5000,
+        "search_key": "Труна Т",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Труна Атлас СПЕЦ (від 1,6м)",
+        "price": 5200,
+        "search_key": "Труна А",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Труна Велюр СПЕЦ (від 1,6м) (Гроб Велюр спец)",
+        "price": 5400,
+        "search_key": "Труна В",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Труна Сонце",
+        "price": 5700,
+        "search_key": "Труна С",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Труна Парча велюр",
+        "price": 5900,
+        "search_key": "Труна П",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Труна Львів Орнам. 4 гран. (Домовина пряма)",
+        "price": 6200,
+        "search_key": "Труна Л",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Труна Сонце СПЕЦ",
+        "price": 6360,
+        "search_key": "Труна С",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Труна Парча - велюр СПЕЦ",
+        "price": 6600,
+        "search_key": "Труна П",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Труна Чорна кришка",
+        "price": 6800,
+        "search_key": "Труна Ч",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Труна Парча плінтус",
+        "price": 7000,
+        "search_key": "Труна П",
+        "dropdown_index": 2
+      },
+      {
+        "name": "Труна Львів Орнам. 6-гран. (Домовина 6 гр.)",
+        "price": 7400,
+        "search_key": "Труна Л",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Труна Львів Супер Спец (Труна Львів Супер Спец )",
+        "price": 7600,
+        "search_key": "Труна Л",
+        "dropdown_index": 2
+      },
+      {
+        "name": "Труна Суми Софт (Гроб Суми Софт)",
+        "price": 7600,
+        "search_key": "Труна С",
+        "dropdown_index": 2
+      },
+      {
+        "name": "Труна Львів S",
+        "price": 7800,
+        "search_key": "Труна Л",
+        "dropdown_index": 3
+      },
+      {
+        "name": "Труна Польща Еко (Гроб Польша плинтус)",
+        "price": 7900,
+        "search_key": "Труна П",
+        "dropdown_index": 3
+      },
+      {
+        "name": "Труна Житомир 8100 (Труна Житомир8100)",
+        "price": 8100,
+        "search_key": "Труна Ж",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Труна Комбі Промінь 6-гран. (Труна (6гр комб) сумы)",
+        "price": 8400,
+        "search_key": "Труна К",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Труна Сонце S Дуже великий (Гроб спец.\"Вилюр\"1250)",
+        "price": 8450,
+        "search_key": "Труна С",
+        "dropdown_index": 3
+      },
+      {
+        "name": "Труна Суми 6-гран. (Гроб 6 гр лак)",
+        "price": 8880,
+        "search_key": "Труна С",
+        "dropdown_index": 4
+      },
+      {
+        "name": "Труна Суми ЕКО (Гроб Сумы лак резьба)",
+        "price": 9200,
+        "search_key": "Труна С",
+        "dropdown_index": 5
+      },
+      {
+        "name": "Труна Хвиля (волна, евро, черепаха, екон, патриот)",
+        "price": 9300,
+        "search_key": "Труна Х",
+        "dropdown_index": 3
+      },
+      {
+        "name": "Труна Верона 6-гран. (Гроб Верона 6гран сумы)",
+        "price": 9400,
+        "search_key": "Труна В",
+        "dropdown_index": 2
+      },
+      {
+        "name": "Труна Онікс 6-гран. (Гроб Оникс 6гран сумы)",
+        "price": 9800,
+        "search_key": "Труна О",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Труна Суми Фенікс (Гроб Суми Фенікс сум)",
+        "price": 9850,
+        "search_key": "Труна С",
+        "dropdown_index": 6
+      },
+      {
+        "name": "Труна МДФ Спец 2,15 (Труна МДФ Спец 2,15 гирун)",
+        "price": 11000,
+        "search_key": "Труна М",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Труна Жизель 4-гран. (гроб 4 уг (кл))",
+        "price": 11100,
+        "search_key": "Труна Ж",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Труна Хадес Білий 1,8 м",
+        "price": 11450,
+        "search_key": "Труна Х",
+        "dropdown_index": 4
+      },
+      {
+        "name": "Труна Перлина (Гроб 4 уг (волна))",
+        "price": 11750,
+        "search_key": "Труна П",
+        "dropdown_index": 4
+      },
+      {
+        "name": "Труна Ровно 4 гран. (Гроб ровно 4гран 4-У)",
+        "price": 11800,
+        "search_key": "Труна Р",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Труна Ровно 6 гран (Гроб Ровно 6-У; 6-НУ)",
+        "price": 12200,
+        "search_key": "Труна Р",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Труна Жизель 6 гран (Гроб 6 уг (волна) житомир)",
+        "price": 12250,
+        "search_key": "Труна Ж",
+        "dropdown_index": 2
+      },
+      {
+        "name": "Труна Ровно 8 гран (Гроб 8гран (Ровно) 8-Д)",
+        "price": 12400,
+        "search_key": "Труна Р",
+        "dropdown_index": 2
+      },
+      {
+        "name": "Труна Женева (Гроб 6 уг (евро) житомир)",
+        "price": 12650,
+        "search_key": "Труна Ж",
+        "dropdown_index": 3
+      },
+      {
+        "name": "Труна Женева Картина (Гроб евро картина Житомир)",
+        "price": 12900,
+        "search_key": "Труна Ж",
+        "dropdown_index": 4
+      },
+      {
+        "name": "Труна Ровно 6 гран S (6-Д, 2,10)",
+        "price": 13200,
+        "search_key": "Труна Р",
+        "dropdown_index": 3
+      },
+      {
+        "name": "Труна Житомир Еко (Гроб МДФ Черкасы )",
+        "price": 13300,
+        "search_key": "Труна Ж",
+        "dropdown_index": 5
+      },
+      {
+        "name": "Труна Ровно 6 гран Білий (Ровно :-Б (белый))",
+        "price": 13500,
+        "search_key": "Труна Р",
+        "dropdown_index": 4
+      },
+      {
+        "name": "Труна Хадес 4-гран. (Гроб \"Хаде\" 4х гр )",
+        "price": 13800,
+        "search_key": "Труна Х",
+        "dropdown_index": 5
+      },
+      {
+        "name": "Труна Хадес 6-гран. (Гроб \"Хадес\" 6ти гр)",
+        "price": 13900,
+        "search_key": "Труна Х",
+        "dropdown_index": 6
+      },
+      {
+        "name": "Труна Хадес Білий 6-гран. (Хадес белый)",
+        "price": 15450,
+        "search_key": "Труна Х",
+        "dropdown_index": 7
+      },
+      {
+        "name": "Труна Хадес Люкс (Хадес перламутр)",
+        "price": 15550,
+        "search_key": "Труна Х",
+        "dropdown_index": 8
+      },
+      {
+        "name": "Труна Хадес S горіх (Хадес спец)",
+        "price": 15650,
+        "search_key": "Труна Х",
+        "dropdown_index": 9
+      },
+      {
+        "name": "Труна Хадес 8-гран. однокрыш. (Домовина лак (8 гр) ст)",
+        "price": 17250,
+        "search_key": "Труна Х",
+        "dropdown_index": 10
+      },
+      {
+        "name": "Труна Вільха 6гр (хвиля) (Труна Вільха 6гр (хвиля))",
+        "price": 17300,
+        "search_key": "Труна В",
+        "dropdown_index": 3
+      },
+      {
+        "name": "Труна Хадес Супер S (Гроб\"Барон\")",
+        "price": 17750,
+        "search_key": "Труна Х",
+        "dropdown_index": 11
+      },
+      {
+        "name": "Труна Вільха 6гр (Гроб Вільха деш 101 Польша)",
+        "price": 19600,
+        "search_key": "Труна В",
+        "dropdown_index": 4
+      },
+      {
+        "name": "Труна Вільха 8 гран (Гроб Польша Волна)",
+        "price": 23000,
+        "search_key": "Труна В",
+        "dropdown_index": 5
+      },
+      {
+        "name": "Труна Вільха 6гр ТВ (Дуб - 103 ТВ/ІТ польш)",
+        "price": 23100,
+        "search_key": "Труна В",
+        "dropdown_index": 6
+      },
+      {
+        "name": "Труна Євро 6-гран. (евро2 6гр)",
+        "price": 27600,
+        "search_key": "Труна Є",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Труна ДУБ 8В (Гроб Польша дуб 8гр)",
+        "price": 27650,
+        "search_key": "Труна Д",
+        "dropdown_index": 3
+      },
+      {
+        "name": "Труна Меніна 4 грані (Менина 4-гр., в.к.)",
+        "price": 27900,
+        "search_key": "Труна М",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Труна Хадес Саркофаг Люкс (Гроб Хадес саркофаг ЛЮКС)",
+        "price": 28000,
+        "search_key": "Труна Х",
+        "dropdown_index": 12
+      },
+      {
+        "name": "Труна Меніна 6-гран. (Менина 6-гр.)",
+        "price": 29500,
+        "search_key": "Труна М",
+        "dropdown_index": 2
+      },
+      {
+        "name": "Труна Дуб 6-гран.",
+        "price": 30000,
+        "search_key": "Труна Д",
+        "dropdown_index": 4
+      },
+      {
+        "name": "Труна Сівас (Гроб Италия А-32 грицен м 24с и 32с)",
+        "price": 30300,
+        "search_key": "Труна С",
+        "dropdown_index": 7
+      },
+      {
+        "name": "Труна Вільха Польща ТВ (гроб вільха 803 польща)",
+        "price": 31100,
+        "search_key": "Труна В",
+        "dropdown_index": 7
+      },
+      {
+        "name": "Труна Польща Дуб 6гр ТВ ( польща гирун)",
+        "price": 32250,
+        "search_key": "Труна П",
+        "dropdown_index": 5
+      },
+      {
+        "name": "Труна Сівас Лік (Труна Сівас Лік гриц м 67с)",
+        "price": 32600,
+        "search_key": "Труна С",
+        "dropdown_index": 8
+      },
+      {
+        "name": "Труна Вільха 2х кр (гроб вільха 812 американка купольна польш)",
+        "price": 33400,
+        "search_key": "Труна В",
+        "dropdown_index": 8
+      },
+      {
+        "name": "Труна Афіна 4-гран. (М-25 4-гр. лес./ор.)",
+        "price": 34100,
+        "search_key": "Труна А",
+        "dropdown_index": 2
+      },
+      {
+        "name": "Труна Вільха 2х кр 8гр ТВ (Гроб Польша 813 )",
+        "price": 34500,
+        "search_key": "Труна В",
+        "dropdown_index": 9
+      },
+      {
+        "name": "Труна Афіна 6 гран (М-25 4-гр. гриценко)",
+        "price": 35600,
+        "search_key": "Труна А",
+        "dropdown_index": 3
+      },
+      {
+        "name": "Труна Француз (Кардинал, Т-15, 6гр )",
+        "price": 35800,
+        "search_key": "Труна Ф",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Труна Меніна Алея (Гроб Менина аллея)",
+        "price": 36500,
+        "search_key": "Труна М",
+        "dropdown_index": 3
+      },
+      {
+        "name": "Труна Француз спец (Кардинал н/с 6гр)",
+        "price": 37800,
+        "search_key": "Труна Ф",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Труна Італія Біла (Италия мод. 60 6-гр. (белая))",
+        "price": 37800,
+        "search_key": "Труна І",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Труна Еллада Різьба (гроб Италия А - 71 (резьба) 1,8)",
+        "price": 37950,
+        "search_key": "Труна Е",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Труна Італія Стандарт (Италия мод. 60 6-гр.)",
+        "price": 38000,
+        "search_key": "Труна І",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Труна Хадес Саркофаг 2-х криш. (Гроб \"Хадес\" (саркофаг 2х кр.))",
+        "price": 38050,
+        "search_key": "Труна Х",
+        "dropdown_index": 13
+      },
+      {
+        "name": "Труна Афіна S (М-25 6-гр., н/с грицен)",
+        "price": 38900,
+        "search_key": "Труна А",
+        "dropdown_index": 4
+      },
+      {
+        "name": "Труна Італія S 6-гран. (Италия М-060 6-гр. н/с)",
+        "price": 39150,
+        "search_key": "Труна І",
+        "dropdown_index": 2
+      },
+      {
+        "name": "Труна Меніна Алея поліпшена (Гроб Менина Алея кр дер)",
+        "price": 39200,
+        "search_key": "Труна М",
+        "dropdown_index": 4
+      },
+      {
+        "name": "Труна Хадес Саркофаг Білий",
+        "price": 40250,
+        "search_key": "Труна Х",
+        "dropdown_index": 14
+      },
+      {
+        "name": "Труна Картина (Гроб италия 71 картина гриценко)",
+        "price": 43700,
+        "search_key": "Труна К",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Труна Словенія поліпшена (Словения польская)",
+        "price": 44200,
+        "search_key": "Труна С",
+        "dropdown_index": 9
+      },
+      {
+        "name": "Труна Амадеус Картина (VIP - Италия с картинками)",
+        "price": 47000,
+        "search_key": "Труна А",
+        "dropdown_index": 5
+      },
+      {
+        "name": "Труна Флоренція біла (Гроб Флоренція біла)",
+        "price": 48100,
+        "search_key": "Труна Ф",
+        "dropdown_index": 2
+      },
+      {
+        "name": "Труна Флоренція (Словение 4х+6 гр. гриценко Д 2К ( м-92-старое))",
+        "price": 48300,
+        "search_key": "Труна Ф",
+        "dropdown_index": 3
+      },
+      {
+        "name": "Труна VIP 6 гран (VIP - шестигранник)",
+        "price": 49000,
+        "search_key": "Труна V",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Труна Франція Біла (Франция 6-гр., улучшенные, белый)",
+        "price": 52000,
+        "search_key": "Труна Ф",
+        "dropdown_index": 4
+      },
+      {
+        "name": "Труна Франція (Франция 6-гр., улучшенные)",
+        "price": 49700,
+        "search_key": "Труна Ф",
+        "dropdown_index": 5
+      },
+      {
+        "name": "Труна Словенія S (Словения 6-гр., улучшенный н/с)",
+        "price": 50600,
+        "search_key": "Труна С",
+        "dropdown_index": 10
+      },
+      {
+        "name": "Труна Меніна Янгол",
+        "price": 52950,
+        "search_key": "Труна М",
+        "dropdown_index": 5
+      },
+      {
+        "name": "Труна Вільха саркофаг (Труна Вільха сарк 2кр польш)",
+        "price": 53000,
+        "search_key": "Труна В",
+        "dropdown_index": 10
+      },
+      {
+        "name": "Труна Відень 8-гран. (Гроб Италия 0080)",
+        "price": 56400,
+        "search_key": "Труна В",
+        "dropdown_index": 11
+      },
+      {
+        "name": "Труна Дуб (Труна VIP поліпшений Индан)",
+        "price": 57300,
+        "search_key": "Труна Д",
+        "dropdown_index": 5
+      },
+      {
+        "name": "Труна ЕКО саркофаг 2х кр (Труна ЕКО саркофаг 2х кр индан)",
+        "price": 59400,
+        "search_key": "Труна Е",
+        "dropdown_index": 2
+      },
+      {
+        "name": "Труна VIP S (VIP - шестигранник н/с)",
+        "price": 61200,
+        "search_key": "Труна V",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Труна VIP старіння (Труна VIP старіння гриценко)",
+        "price": 62600,
+        "search_key": "Труна V",
+        "dropdown_index": 2
+      },
+      {
+        "name": "Труна Відень 8-гран. S (гриценко)",
+        "price": 63300,
+        "search_key": "Труна В",
+        "dropdown_index": 12
+      },
+      {
+        "name": "Труна VIP Дуб (VIP - шестигранник дуб)",
+        "price": 63500,
+        "search_key": "Труна V",
+        "dropdown_index": 3
+      },
+      {
+        "name": "Труна Вільха 2-х кр 8гр (польша МН 8 2х крыш)",
+        "price": 64500,
+        "search_key": "Труна В",
+        "dropdown_index": 13
+      },
+      {
+        "name": "Труна Вільха Польща (польша шкіра 801 )",
+        "price": 96800,
+        "search_key": "Труна В",
+        "dropdown_index": 14
+      },
+      {
+        "name": "Труна Миллениум (МК 2 орех, Гриценко (Италия 0092))",
+        "price": 120000,
+        "search_key": "Труна М",
+        "dropdown_index": 6
+      },
+      {
+        "name": "Труна Барокко (Гроб Виктория гриценко, гирун)",
+        "price": 154000,
+        "search_key": "Труна Б",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Труна Янгол, саркофаг (Труна Колонни, Янгол, саркофаг гриц)",
+        "price": 135000,
+        "search_key": "Труна Я",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Труна Канада Ясінь (Гроб канада коллні ясень)",
+        "price": 165000,
+        "search_key": "Труна К",
+        "dropdown_index": 2
+      },
+      {
+        "name": "Труна Канада накладки (Гроб ангел Канада накладки)",
+        "price": 180000,
+        "search_key": "Труна К",
+        "dropdown_index": 3
+      },
+      {
+        "name": "Труна Канада Колони біла (Канада колонны, белій + сарк 2х кріш)",
+        "price": 182000,
+        "search_key": "Труна К",
+        "dropdown_index": 4
+      },
+      {
+        "name": "Труна Невада Янгол горіх (Канада фигурки, саркофаг двухкрыш)",
+        "price": 220000,
+        "search_key": "Труна Н",
+        "dropdown_index": 1
+      },
+      {
+        "name": "Труна Невада Колони (канада)",
+        "price": 230000,
+        "search_key": "Труна Н",
+        "dropdown_index": 2
+      },
+      {
+        "name": "Труна Канада Колони S (Гроб\" Канада\" колонны Н\\.С саркофаг 2-крыш)",
+        "price": 245000,
+        "search_key": "Труна К",
+        "dropdown_index": 5
+      },
+      {
+        "name": "Труна Канада Супер S (Труна Канада Супер S ин дан)",
+        "price": 255000,
+        "search_key": "Труна К",
+        "dropdown_index": 6
+      },
+      {
+        "name": "Труна Невада Янгол біла (Канада фигурки, саркофаг двухкрыш. белый)",
+        "price": 280000,
+        "search_key": "Труна Н",
+        "dropdown_index": 3
+      },
+      {
+        "name": "Труна Вікторія Сваровсткі (Гроб \"Виктория-Сваровский\")",
+        "price": 450000,
+        "search_key": "Труна В",
+        "dropdown_index": 15
+      },
+      {
+        "name": "Труна Сенатор (Гроб \"Сенатор гриценко)",
+        "price": 500000,
+        "search_key": "Труна С",
+        "dropdown_index": 11
+      },
+      {
+        "name": "Труна Сенатор білий (Труна Сенатор білий ин дан)",
+        "price": 510000,
+        "search_key": "Труна С",
+        "dropdown_index": 12
+      },
+      {
+        "name": "Труна Грааль",
+        "price": 550000,
+        "search_key": "Труна Г",
+        "dropdown_index": 0
+      },
+      {
+        "name": "Труна Вікторія Преміум (Гроб \"Виктория\" саркофаг двухкрышечный)",
+        "price": 600000,
+        "search_key": "Труна В",
+        "dropdown_index": 16
+      },
+      {
+        "name": "Труна Президент (Гроб \"Патриот\" )",
+        "price": 800000,
+        "search_key": "Труна П",
+        "dropdown_index": 6
+      }
+    ]
+  },
+  "services_list": [
+    "Послуги СП КПО",
+    "доки",
+    "Послуги моргу",
+    "Транспортування",
+    "Пакет/Плівка/Бокс",
+    "Сейф-комплект",
+    "Помити/одягти",
+    "Завантаження/розвантаження",
+    "Укладання в труну",
+    "Знесення по поверхах",
+    "Антибакт. обробка тіла",
+    "Антибакт. обробка приміщення",
+    "Вологе прибирання",
+    "Прибирання гнильних змін",
+    "Доставка",
+    "Збереження",
+    "Розпакування контейнера",
+    "Катафалк",
+    "Доставка ритуального приладдя",
+    "Перевезення покійного",
+    "Автотранспорт під вінки",
+    "Автотранспорт під атрибут",
+    "Лімузин",
+    "Доп 18 місць (Автотранспорт под людей)",
+    "Доп 18 місць (Підвищеної комфортності) (Автотранспорт под людей)",
+    "Доп 30 місць (Автотранспорт под людей)",
+    "Доп 30 місць (Підвищеної комфортності) (Автотранспорт под людей)",
+    "Церемоніймейстер",
+    "Церемоніймейстер-РАНГ 2-й",
+    "Церемоніймейстер-РАНГ 1-й",
+    "церемоніймейстер (доп. точка)",
+    "церемоніймейстер (до 100км)",
+    "Поминальна панахида",
+    "Послуги персоналу для поховання",
+    "снос",
+    "снос-ескорт",
+    "снос (доп. точка)",
+    "снос (до 100км)",
+    "Пронос труни",
+    "Послуги священика",
+    "Послуги храму",
+    "Послуги диякона",
+    "Хор (півчі)",
+    "Громадянська панахида",
+    "Викопування мог.",
+    "Прибирання мог.",
+    "Демонтаж",
+    "Розбір",
+    "Насипний пагорб",
+    "Встанов. хреста",
+    "Декор могили",
+    "Декор могили + прощалка",
+    "Атласна дор.",
+    "Закопування/опускання труни",
+    "Намет",
+    "Альтанка",
+    "Подіум",
+    "Шатер",
+    "Духовий оркестр",
+    "Ліфт",
+    "Труна",
+    "Хрест",
+    "Табличка на хрест",
+    "Напис на хрест",
+    "Вінок",
+    "Стрічка",
+    "Портрет у рамці",
+    "Портрет пластик",
+    "Хусточки",
+    "Свічки",
+    "Панахида для священика",
+    "Колево",
+    "Рит. набір",
+    "Комплект рушників",
+    "Рушник на хрест",
+    "Рушник на портрет",
+    "Рушник на кришку труни",
+    "Хрестик на труну",
+    "Ікона",
+    "Косинка",
+    "Подушка",
+    "Покривало",
+    "Капці",
+    "Білий одяг",
+    "Костюм",
+    "Сукня",
+    "Сарафан",
+    "Табличка тимчасова",
+    "Свічники",
+    "Підставки под труну",
+    "Підставки під портрет",
+    "Мольберт",
+    "Столик",
+    "Стілець",
+    "Ваза",
+    "Стійки під вінки",
+    "Комплект для вмивання рук",
+    "Грунт для урни",
+    "Доставка урни",
+    "Підпоховання урни",
+    "Урна",
+    "Запайка"
+  ]
+}

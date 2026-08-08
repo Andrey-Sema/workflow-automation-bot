@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 
+from src.catalog_schema import CatalogReport, sanitize_catalog, validate_catalog
 from src.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -50,7 +51,7 @@ def _load_catalog() -> dict:
     path = _settings.catalog_path
     try:
         with open(path, encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
     except FileNotFoundError:
         logger.error("⚠️ catalog.json не найден по пути %s. Работаю с пустым каталогом.", path)
         return {}
@@ -58,10 +59,43 @@ def _load_catalog() -> dict:
         logger.error("⚠️ catalog.json повреждён (невалидный JSON): %s", e)
         return {}
 
+    _log_catalog_report(validate_catalog(data), path)
+    # Публикуем очищенную копию, а не сырую: репортить о битой позиции и
+    # тут же отдать её в agent_logic означало бы падение посреди наряда.
+    return sanitize_catalog(data)
 
-CATALOG_DATA = _load_catalog()
-SERVICES_LIST = CATALOG_DATA.get("services_list", [])
-SERVICES_JSON = json.dumps(SERVICES_LIST, ensure_ascii=False)
+
+def _log_catalog_report(report: CatalogReport, path: object) -> None:
+    """Surfaces catalog problems at load time rather than mid-order.
+
+    Errors are logged but not raised: a partly-broken catalog still lets
+    operators work on the lines it does cover, and refusing to start would
+    take the whole bot down over one malformed price.
+    """
+    for issue in report.errors:
+        logger.error("catalog %s: %s", path, issue)
+    for issue in report.warnings:
+        logger.warning("catalog %s: %s", path, issue)
+    if report.warnings or report.errors:
+        logger.warning(
+            "📖 Каталог загружен с замечаниями: %s ошибок, %s предупреждений (подробнее: /catalog_check)",
+            len(report.errors), len(report.warnings),
+        )
+
+
+def _apply_catalog(data: dict) -> dict:
+    """Publishes a catalog dict as the process-wide snapshot."""
+    global CATALOG_DATA, SERVICES_LIST, SERVICES_JSON
+    CATALOG_DATA = data
+    SERVICES_LIST = CATALOG_DATA.get("services_list", [])
+    SERVICES_JSON = json.dumps(SERVICES_LIST, ensure_ascii=False)
+    return CATALOG_DATA
+
+
+CATALOG_DATA: dict = {}
+SERVICES_LIST: list = []
+SERVICES_JSON: str = "[]"
+_apply_catalog(_load_catalog())
 CEMETERIES_JSON = json.dumps(CEMETERIES_DICT, ensure_ascii=False)
 
 
@@ -70,10 +104,24 @@ def catalog_is_loaded() -> bool:
     return bool(CATALOG_DATA)
 
 
+def check_catalog() -> CatalogReport:
+    """Re-validates the in-memory catalog. Backs the /catalog_check command."""
+    return validate_catalog(CATALOG_DATA)
+
+
 def reload_catalog() -> dict:
     """Re-read catalog.json from disk (used by the Telegram admin panel after edits)."""
-    global CATALOG_DATA, SERVICES_LIST, SERVICES_JSON
-    CATALOG_DATA = _load_catalog()
-    SERVICES_LIST = CATALOG_DATA.get("services_list", [])
-    SERVICES_JSON = json.dumps(SERVICES_LIST, ensure_ascii=False)
-    return CATALOG_DATA
+    return _apply_catalog(_load_catalog())
+
+
+def load_catalog_from(path) -> dict:
+    """Loads an arbitrary catalog file as the active catalog.
+
+    Exists for offline tooling (`tools/simulate_order.py`, tests) that needs
+    to run the real business rules against a specific catalog file without
+    moving files around or mutating module globals by hand.
+    """
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    _log_catalog_report(validate_catalog(data), path)
+    return _apply_catalog(sanitize_catalog(data))

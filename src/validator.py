@@ -4,7 +4,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from src.utils import fix_temporal_hallucinations
+from src.utils import MAX_PG_INT, fix_temporal_hallucinations
 
 logger = logging.getLogger(__name__)
 
@@ -38,10 +38,27 @@ class Service(BaseModel):
     search_key: str = Field(default="", alias="1c_search_key")
     c_down_presses: int = Field(default=0, alias="1c_down_presses")
 
-    @field_validator('price', 'quantity')
-    def must_be_positive(cls, v):
+    # How the catalog match was made, and whether it was a confident one.
+    # Declared here because `model_dump()` only keeps declared fields — an
+    # undeclared key set by agent_logic is silently dropped at validation,
+    # which is what would strip a "check this line" flag on its way to the
+    # operator's summary.
+    match_confidence: str = Field(default="", alias="1c_match_confidence")
+    match_reason: str = Field(default="", alias="1c_match_reason")
+
+    @field_validator('price', 'quantity', 'unit_price_for_1c')
+    def must_be_in_range(cls, v):
+        """Отсекает и отрицательные значения, и переполнение.
+
+        Верхняя граница — не педантизм: цена приходит из распознавания
+        рукописи, где «1550» легко превращается в 15-значное число. Такая
+        позиция должна выпасть из наряда (её подберут вручную), а не
+        уехать в 1С суммой, которую там негде разместить.
+        """
         if v < 0:
             raise ValueError('Значение не может быть отрицательным')
+        if v > MAX_PG_INT:
+            raise ValueError(f'Значение превышает допустимый максимум ({MAX_PG_INT})')
         return v
 
 

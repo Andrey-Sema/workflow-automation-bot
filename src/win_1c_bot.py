@@ -13,7 +13,15 @@ from pathlib import Path
 
 try:
     import pyautogui
-except ImportError:  # pragma: no cover - only missing outside the automation container
+except Exception:  # pragma: no cover - only fails outside the automation container
+    # Deliberately broader than ImportError. With pyautogui installed but no
+    # X display reachable, the failure comes from deep inside its own import
+    # (mouseinfo does os.environ['DISPLAY'] at module scope) and surfaces as
+    # KeyError, not ImportError — so an ImportError-only guard let it escape
+    # and killed the process at import time, before any of the friendly
+    # "pyautogui недоступен" handling below could run. That happens on a
+    # headless machine and in the window between Xvfb starting and DISPLAY
+    # being usable.
     pyautogui = None
 
 logger = logging.getLogger(__name__)

@@ -12,8 +12,14 @@ services:
       # Optional: mount a Docker secret instead of RDP_PASSWORD in .env.
       # - ./secrets/rdp_password:/run/secrets/rdp_password:ro
     ports:
-      # noVNC live viewer — only actually served when DEBUG_VNC=true (see .env.example)
-      - "6080:6080"
+      # noVNC live viewer — only actually served when DEBUG_VNC=true (see
+      # .env.example). Bound to loopback by default and NOT to 0.0.0.0: this
+      # viewer shows the live RDP session, i.e. the 1C window with customer
+      # and deceased personal data in it, and neither x11vnc nor noVNC
+      # authenticates by default. Reach it over an SSH tunnel
+      # (`ssh -L 6080:localhost:6080 <host>`), or set VNC_BIND=0.0.0.0
+      # deliberately if the host is on a trusted network.
+      - "${VNC_BIND:-127.0.0.1}:6080:6080"
       # Prometheus /metrics — only meaningfully scraped from inside the
       # compose network (the prometheus service below); uncomment to also
       # inspect it from the host directly.
@@ -72,7 +78,10 @@ services:
       # Change this in .env for anything beyond local/first-look use -
       # GF_SECURITY_ADMIN_PASSWORD is read from the shell environment, not
       # baked into the image, so set it in .env rather than editing here.
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      # No "admin" fallback: with the port published, an unset variable
+      # meant admin/admin on a live dashboard. Compose now refuses to start
+      # with an actionable message instead.
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?установи GRAFANA_ADMIN_PASSWORD в .env}
     volumes:
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./monitoring/grafana/dashboards:/etc/grafana/dashboards:ro
@@ -85,7 +94,10 @@ services:
         max-size: "5m"
         max-file: "3"
     ports:
-      - "3000:3000"
+      # Loopback by default, same reasoning as the noVNC port above: the
+      # dashboard exposes order volumes and RDP state. Set GRAFANA_BIND to
+      # 0.0.0.0 to publish it on a trusted network.
+      - "${GRAFANA_BIND:-127.0.0.1}:3000:3000"
 
 volumes:
   prometheus_data:

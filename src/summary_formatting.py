@@ -41,10 +41,19 @@ def format_order_summary(summary: OrderSummary, *, order_id: str) -> str:
     if summary.missing_birth_date:
         lines.append("🚨 Дата рождения не указана на бланке")
 
+    if summary.death_after_burial:
+        lines.append("🚨 Дата смерти позже даты похорон — одна из дат распознана неверно")
+
     if summary.unmapped_items:
         lines.append("")
         lines.append("🔧 <b>Строки, требующие ручной проверки (нет соответствия в каталоге 1С):</b>")
         for name in summary.unmapped_items:
+            lines.append(f"  • {escape(name)}")
+
+    if summary.review_items:
+        lines.append("")
+        lines.append("🔍 <b>Сопоставлено только по цене — сверь с бланком:</b>")
+        for name in summary.review_items:
             lines.append(f"  • {escape(name)}")
 
     if summary.warnings:

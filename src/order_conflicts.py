@@ -11,6 +11,7 @@ for: "краткая сводка по ФИО, сумме которая в бл
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 
 SUM_MISMATCH_TOLERANCE_RATIO = 0.01
 SENTINEL_BIRTH_DATE = "01.01.1920"
@@ -26,7 +27,13 @@ class OrderSummary:
     sum_mismatch: bool
     sum_diff: int
     missing_birth_date: bool
+    # Дата смерти позже даты похорон. Раньше это состояние вообще не могло
+    # быть замечено: «щит от галлюцинаций» молча подтягивал год смерти к
+    # текущему и сам же создавал такую пару. Теперь дата сохраняется как в
+    # бланке, а несогласованность показывается оператору.
+    death_after_burial: bool = False
     unmapped_items: list[str] = field(default_factory=list)
+    review_items: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     services_count: int = 0
     goods_count: int = 0
@@ -34,18 +41,36 @@ class OrderSummary:
 
     @property
     def has_conflicts(self) -> bool:
-        return self.sum_mismatch or self.missing_birth_date or bool(self.unmapped_items)
+        return (
+            self.sum_mismatch
+            or self.missing_birth_date
+            or self.death_after_burial
+            or bool(self.unmapped_items)
+            or bool(self.review_items)
+        )
 
     @property
     def can_auto_enter(self) -> bool:
         """Whether onec_order_entry can attempt every line automatically.
 
         Unmapped items always block full auto-entry (see
-        `OneCOrderEntryBot.enter_item`); a sum mismatch or missing birth
-        date is a data-quality conflict to show the operator but doesn't
-        by itself stop 1C typing.
+        `OneCOrderEntryBot.enter_item`); a sum mismatch, missing birth date
+        or low-confidence match is a data-quality conflict to show the
+        operator but doesn't by itself stop 1C typing.
         """
         return not self.unmapped_items
+
+
+def _death_after_burial(deceased: dict) -> bool:
+    """Хоронить раньше смерти нельзя — такая пара дат означает, что одну из
+    них распознали неверно. Молчит, если хотя бы одна дата отсутствует или
+    записана в неразобранном формате: догадываться тут не о чем."""
+    try:
+        death = datetime.strptime(deceased.get("death_date", ""), "%d.%m.%Y")
+        burial = datetime.strptime(deceased.get("burial_date", ""), "%d.%m.%Y")
+    except (ValueError, TypeError):
+        return False
+    return death > burial
 
 
 def build_order_summary(order_data: dict) -> OrderSummary:
@@ -60,12 +85,15 @@ def build_order_summary(order_data: dict) -> OrderSummary:
         sum_mismatch = abs(handwritten - calculated) > tolerance
 
     unmapped: list[str] = []
+    review: list[str] = []
     services = order_data.get("services", []) or []
     goods = order_data.get("goods", []) or []
     transport = order_data.get("transport", []) or []
     for item in (*services, *goods, *transport):
         if not item.get("1c_search_key"):
             unmapped.append(item.get("name", "?"))
+        elif item.get("1c_match_confidence") == "low":
+            review.append(item.get("name", "?"))
 
     return OrderSummary(
         deceased_fio=deceased.get("fio") or "НЕ УКАЗАНО",
@@ -76,7 +104,9 @@ def build_order_summary(order_data: dict) -> OrderSummary:
         sum_mismatch=sum_mismatch,
         sum_diff=handwritten - calculated,
         missing_birth_date=deceased.get("birth_date") == SENTINEL_BIRTH_DATE,
+        death_after_burial=_death_after_burial(deceased),
         unmapped_items=unmapped,
+        review_items=review,
         warnings=list(order_data.get("warnings", [])),
         services_count=len(services),
         goods_count=len(goods),

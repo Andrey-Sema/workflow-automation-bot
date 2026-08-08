@@ -20,13 +20,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 python3-venv python3-pip python3-tk build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-RUN python3 -m venv --system-site-packages /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
+# uv resolves and installs from the committed uv.lock, so the image gets the
+# exact versions CI tested — a plain `pip install -r` would silently pick up
+# new transitive releases between the CI run and the image build.
+COPY --from=ghcr.io/astral-sh/uv:0.8.17 /uv /usr/local/bin/uv
+
+# --system-site-packages: pyautogui imports mouseinfo, which needs the
+# apt-installed python3-tk belonging to this exact interpreter build.
+RUN uv venv --system-site-packages --python /usr/bin/python3 /opt/venv
+ENV PATH="/opt/venv/bin:$PATH" \
+    VIRTUAL_ENV=/opt/venv \
+    UV_PYTHON_DOWNLOADS=never \
+    UV_LINK_MODE=copy
 
 WORKDIR /build
-COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt
+# Lock + manifest only: this layer is cached until dependencies actually
+# change, so editing src/ doesn't trigger a full reinstall.
+COPY pyproject.toml uv.lock README.md ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-install-project
 
 
 FROM ubuntu:24.04
