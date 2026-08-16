@@ -82,7 +82,17 @@ def _tokenize(text: str) -> set[str]:
     return set(re.findall(r"\w+", text.lower()))
 
 
-def _apply_1c_mapping(item: dict, category_key: str) -> bool:
+def _digit_confusable(a: int, b: int) -> bool:
+    """True when `a` and `b` have the same number of digits and differ in
+    exactly one digit position — the classic handwritten-OCR misread
+    (Vision reading "5650" off the form instead of the actual "3650")."""
+    sa, sb = str(a), str(b)
+    if len(sa) != len(sb) or sa == sb:
+        return False
+    return sum(x != y for x, y in zip(sa, sb, strict=True)) == 1
+
+
+def _apply_1c_mapping(item: dict, category_key: str, warnings: list[str] | None = None) -> bool:
     """Берет точные данные для вбивания в 1С прямо из подготовленного JSON.
 
     Несколько карточок 1С могут стоить одинаково (например, "снос" за
@@ -90,11 +100,32 @@ def _apply_1c_mapping(item: dict, category_key: str) -> bool:
     (ДОП ТОЧКА/ГОДИНА)") — при неоднозначности по цене выбираем ту
     карточку, чьё название сильнее пересекается по словам с исходным
     названием строки, вместо произвольного первого совпадения.
+
+    Если точной цены в каталоге нет вообще, НИКОГДА не подставляем
+    ближайшую по значению карточку молча — цена решает, что вбивается в
+    1С, и угадывать её нельзя. Вместо этого, если рядом (`warnings`
+    передан), ищем в той же категории цены, отличающиеся от указанной
+    ровно на одну цифру (5650 вместо 3650 и т.п.), и добавляем явное
+    предупреждение оператору — чтобы он перепроверил бланк, а не полагался
+    на то, что "нет соответствия" само по себе укажет на опечатку.
     """
     mapping_list = CATALOG_MAPPING.get(category_key, [])
     target_price = item.get("unit_price_for_1c", item.get("price", 0))
     candidates = [c for c in mapping_list if c.get("price") == target_price]
+
     if not candidates:
+        if warnings is not None:
+            suspects = sorted(
+                (c for c in mapping_list if _digit_confusable(target_price, c.get("price", 0))),
+                key=lambda c: abs(c["price"] - target_price),
+            )[:3]
+            if suspects:
+                variants = ", ".join(f"«{c['name']}» ({c['price']} грн)" for c in suspects)
+                warnings.append(
+                    f"🔎 Похоже на ошибку распознавания цифр: «{item.get('name', '?')}» — "
+                    f"{target_price} грн, такой цены нет в каталоге 1С, но есть {variants}. "
+                    f"Сверь цену на бланке вручную!"
+                )
         return False
 
     if len(candidates) > 1:
@@ -132,7 +163,7 @@ def _process_complex_goods_and_mapping(goods: list[dict], warnings: list[str]) -
             category = "towels"
 
         if category:
-            mapped = _apply_1c_mapping(item, category)
+            mapped = _apply_1c_mapping(item, category, warnings)
             if not mapped:
                 item["name"] = find_best_service_name(item["name"])
         else:
@@ -223,14 +254,14 @@ def apply_business_rules_in_python(data: dict[str, Any], num_addresses: int, boo
                 s["name"] = package["name"]
 
             total_staff_count += raw_qty
-            if not _apply_1c_mapping(s, "services"):
+            if not _apply_1c_mapping(s, "services", warnings):
                 s["name"] = find_best_service_name(s["name"])
             clean_services.append(s)
             continue
 
         if "церемоніймейстер" in name_lower:
             total_staff_count += 1
-            if not _apply_1c_mapping(s, "services"):
+            if not _apply_1c_mapping(s, "services", warnings):
                 s["name"] = find_best_service_name(s["name"])
             clean_services.append(s)
             continue
@@ -239,12 +270,12 @@ def apply_business_rules_in_python(data: dict[str, Any], num_addresses: int, boo
             goods.append(s)
             continue
 
-        if not _apply_1c_mapping(s, "services"):
+        if not _apply_1c_mapping(s, "services", warnings):
             s["name"] = find_best_service_name(s["name"])
         clean_services.append(s)
 
     for t in transport:
-        if not _apply_1c_mapping(t, "services"):
+        if not _apply_1c_mapping(t, "services", warnings):
             t["name"] = find_best_service_name(t["name"])
         total_vehicle_count += max(1, t.get("quantity", 1))
 

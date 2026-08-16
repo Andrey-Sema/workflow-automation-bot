@@ -197,6 +197,40 @@ def test_personnel_package_resolves_qty_and_maps_to_1c(monkeypatch):
     assert svc["1c_search_key"] == "снос"
 
 
+def test_digit_misread_price_raises_explicit_warning(monkeypatch):
+    """Регресс: гроб за 3650 грн, распознанный Vision-агентом как 5650
+    (перепутана одна цифра почерка), раньше просто молча уходил в 'нет
+    соответствия в каталоге' наравне с любой другой неизвестной позицией.
+    Теперь для цен, отличающихся от каталожной ровно на одну цифру,
+    бот явно предупреждает оператора вместо того, чтобы вестись на
+    ошибку распознавания."""
+    monkeypatch.setattr(agent_logic, "CATALOG_MAPPING", {
+        "coffins": [{"name": "Труна Атлас", "price": 3650, "search_key": "Труна А", "dropdown_index": 0}],
+    })
+    goods = [{"name": "Труна (Бордо)", "price": 5650, "quantity": 1, "unit_price_for_1c": 5650}]
+    warnings: list[str] = []
+    agent_logic._process_complex_goods_and_mapping(goods, warnings)
+
+    assert goods[0].get("1c_search_key", "") == ""
+    assert len(warnings) == 1
+    assert "Труна Атлас" in warnings[0]
+    assert "3650" in warnings[0]
+    assert "5650" in warnings[0]
+
+
+def test_digit_misread_warning_not_raised_for_unrelated_prices(monkeypatch):
+    """Не должно шуметь про цифры, если каталожная цена вообще не похожа —
+    отличается больше чем на одну цифру или другой длины."""
+    monkeypatch.setattr(agent_logic, "CATALOG_MAPPING", {
+        "coffins": [{"name": "Труна Атлас", "price": 3650, "search_key": "Труна А", "dropdown_index": 0}],
+    })
+    goods = [{"name": "Труна", "price": 12000, "quantity": 1, "unit_price_for_1c": 12000}]
+    warnings: list[str] = []
+    agent_logic._process_complex_goods_and_mapping(goods, warnings)
+
+    assert warnings == []
+
+
 # --- ТЕСТЫ API (MOCKING) ---
 
 @patch("src.agent_logic.get_client")
