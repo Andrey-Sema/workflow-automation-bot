@@ -26,6 +26,7 @@ def mock_catalog(monkeypatch):
         "extra_point": 500,
         "transport_base": 1000
     })
+    monkeypatch.setattr(agent_logic, "PERSONNEL_PACKAGES", {})
     monkeypatch.setattr(agent_logic, "SERVICES_LIST", [
         "Катафалк", "Пронос труни", "Послуги священика", "Закопування/опускання труни", "снос"
     ])
@@ -130,6 +131,104 @@ def test_blacklist_logic():
     data = {"services": [{"name": "снос", "price": 1300, "quantity": 4}]}
     result = agent_logic.apply_business_rules_in_python(data, num_addresses=0, booked_in_1c=["снос"])
     assert len(result["services"]) == 0
+
+
+# --- ТЕСТЫ 1С-МАППИНГА ДЛЯ УСЛУГ И ТРАНСПОРТА ---
+
+def test_services_and_transport_get_1c_mapping(monkeypatch):
+    """Регресс: раньше 1c_search_key проставлялся только для goods, а
+    услуги/транспорт (снос, перевезення, доставка) всегда уходили на
+    ручную проверку, даже если для них есть точная карточка в каталоге."""
+    monkeypatch.setattr(agent_logic, "CATALOG_MAPPING", {
+        "services": [
+            {"name": "Перевезення покійного", "price": 1200, "search_key": "Перевезення", "dropdown_index": 2},
+            {"name": "Доставка(Стандарт)", "price": 850, "search_key": "Доставка (", "dropdown_index": 3},
+        ]
+    })
+    data = {
+        "services": [{"name": "Довезення небіжчика", "price": 1200, "quantity": 1}],
+        "transport": [{"name": "Доставка ритуального приладдя", "price": 850, "quantity": 1}],
+    }
+    result = agent_logic.apply_business_rules_in_python(data, num_addresses=0, booked_in_1c=[])
+
+    assert result["services"][0]["name"] == "Перевезення покійного"
+    assert result["services"][0]["1c_search_key"] == "Перевезення"
+    assert result["transport"][0]["name"] == "Доставка(Стандарт)"
+    assert result["transport"][0]["1c_search_key"] == "Доставка ("
+
+
+def test_1c_mapping_disambiguates_same_price_by_name_overlap(monkeypatch):
+    """Два разных пункта в 1С могут стоить одинаково (снос за 500 грн есть
+    и как "Завантаження/розвантаження", и как "Персонал (ДОП ТОЧКА)") —
+    выбираем тот, чьё название ближе к исходному, а не первый по списку."""
+    monkeypatch.setattr(agent_logic, "CATALOG_MAPPING", {
+        "services": [
+            {
+                "name": "Завантаження чи розвантаження - СНОС (1 чол.)",
+                "price": 500, "search_key": "снос", "dropdown_index": 5,
+            },
+            {"name": "Персонал (ДОП ТОЧКА/ГОДИНА)", "price": 500, "search_key": "персонал", "dropdown_index": 2},
+        ]
+    })
+    item = {"name": "снос (доп. точка)", "price": 500, "unit_price_for_1c": 500}
+    assert agent_logic._apply_1c_mapping(item, "services") is True
+    assert item["1c_search_key"] == "персонал"
+
+
+def test_personnel_package_resolves_qty_and_maps_to_1c(monkeypatch):
+    """Бланк часто пишет одну общую сумму пакета персонала (напр. 6200 за
+    "снос" вчетвером) без явной цены за штуку — по personnel_packages
+    восстанавливаем к-ть/цену за штуку и уже по ней ищем карточку в 1С."""
+    monkeypatch.setattr(agent_logic, "PERSONNEL_PACKAGES", {
+        "6200": {"name": "снос", "qty": 4},
+    })
+    monkeypatch.setattr(agent_logic, "CATALOG_MAPPING", {
+        "services": [
+            {"name": "снос (Галстук)", "price": 1550, "search_key": "снос", "dropdown_index": 9},
+        ]
+    })
+    data = {"services": [{"name": "Послуги персоналу для поховання", "price": 6200, "quantity": 1}]}
+    result = agent_logic.apply_business_rules_in_python(data, num_addresses=0, booked_in_1c=[])
+
+    svc = result["services"][0]
+    assert svc["quantity"] == 4
+    assert svc["unit_price_for_1c"] == 1550
+    assert svc["name"] == "снос (Галстук)"
+    assert svc["1c_search_key"] == "снос"
+
+
+def test_digit_misread_price_raises_explicit_warning(monkeypatch):
+    """Регресс: гроб за 3650 грн, распознанный Vision-агентом как 5650
+    (перепутана одна цифра почерка), раньше просто молча уходил в 'нет
+    соответствия в каталоге' наравне с любой другой неизвестной позицией.
+    Теперь для цен, отличающихся от каталожной ровно на одну цифру,
+    бот явно предупреждает оператора вместо того, чтобы вестись на
+    ошибку распознавания."""
+    monkeypatch.setattr(agent_logic, "CATALOG_MAPPING", {
+        "coffins": [{"name": "Труна Атлас", "price": 3650, "search_key": "Труна А", "dropdown_index": 0}],
+    })
+    goods = [{"name": "Труна (Бордо)", "price": 5650, "quantity": 1, "unit_price_for_1c": 5650}]
+    warnings: list[str] = []
+    agent_logic._process_complex_goods_and_mapping(goods, warnings)
+
+    assert goods[0].get("1c_search_key", "") == ""
+    assert len(warnings) == 1
+    assert "Труна Атлас" in warnings[0]
+    assert "3650" in warnings[0]
+    assert "5650" in warnings[0]
+
+
+def test_digit_misread_warning_not_raised_for_unrelated_prices(monkeypatch):
+    """Не должно шуметь про цифры, если каталожная цена вообще не похожа —
+    отличается больше чем на одну цифру или другой длины."""
+    monkeypatch.setattr(agent_logic, "CATALOG_MAPPING", {
+        "coffins": [{"name": "Труна Атлас", "price": 3650, "search_key": "Труна А", "dropdown_index": 0}],
+    })
+    goods = [{"name": "Труна", "price": 12000, "quantity": 1, "unit_price_for_1c": 12000}]
+    warnings: list[str] = []
+    agent_logic._process_complex_goods_and_mapping(goods, warnings)
+
+    assert warnings == []
 
 
 # --- ТЕСТЫ API (MOCKING) ---

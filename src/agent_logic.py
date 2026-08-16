@@ -1,4 +1,5 @@
 import logging
+import re
 import time
 from difflib import get_close_matches
 from functools import lru_cache
@@ -26,7 +27,7 @@ def _load_from_catalog() -> None:
     tariffs/mappings without a restart.
     """
     global SERVICES_JSON, CEMETERIES_JSON
-    global DIGGING_RULES, KNOWN_UNIT_PRICES, CATALOG_MAPPING, SERVICES_LIST, TARIFFS
+    global DIGGING_RULES, KNOWN_UNIT_PRICES, CATALOG_MAPPING, SERVICES_LIST, TARIFFS, PERSONNEL_PACKAGES
     SERVICES_JSON = config.SERVICES_JSON
     CEMETERIES_JSON = config.CEMETERIES_JSON
     DIGGING_RULES = config.CATALOG_DATA.get("digging_rules", {})
@@ -34,6 +35,11 @@ def _load_from_catalog() -> None:
     CATALOG_MAPPING = config.CATALOG_DATA.get("catalog_1c_mapping", {})
     SERVICES_LIST = config.CATALOG_DATA.get("services_list", [])
     TARIFFS = config.CATALOG_DATA.get("tariffs", {})
+    # {"<общая сумма пакета>": {"name": "снос"/"снос-ескорт", "qty": N}} —
+    # позволяет распознать фиксованный пакет персонала (снос вчетвером,
+    # ескорт вшестером ...) по одной лишь сумме на бланке и восстановить
+    # реальное к-ть/цену за штуку перед сопоставлением с 1С.
+    PERSONNEL_PACKAGES = config.CATALOG_DATA.get("personnel_packages", {})
 
 
 _load_from_catalog()
@@ -72,19 +78,69 @@ def find_best_service_name(raw_name: str) -> str:
     return matches[0] if matches else raw_name
 
 
-def _apply_1c_mapping(item: dict, category_key: str) -> bool:
-    """Берет точные данные для вбивания в 1С прямо из подготовленного JSON."""
+def _tokenize(text: str) -> set[str]:
+    return set(re.findall(r"\w+", text.lower()))
+
+
+def _digit_confusable(a: int, b: int) -> bool:
+    """True when `a` and `b` have the same number of digits and differ in
+    exactly one digit position — the classic handwritten-OCR misread
+    (Vision reading "5650" off the form instead of the actual "3650")."""
+    sa, sb = str(a), str(b)
+    if len(sa) != len(sb) or sa == sb:
+        return False
+    return sum(x != y for x, y in zip(sa, sb, strict=True)) == 1
+
+
+def _apply_1c_mapping(item: dict, category_key: str, warnings: list[str] | None = None) -> bool:
+    """Берет точные данные для вбивания в 1С прямо из подготовленного JSON.
+
+    Несколько карточок 1С могут стоить одинаково (например, "снос" за
+    500 грн есть и как "Завантаження/розвантаження", и как "Персонал
+    (ДОП ТОЧКА/ГОДИНА)") — при неоднозначности по цене выбираем ту
+    карточку, чьё название сильнее пересекается по словам с исходным
+    названием строки, вместо произвольного первого совпадения.
+
+    Если точной цены в каталоге нет вообще, НИКОГДА не подставляем
+    ближайшую по значению карточку молча — цена решает, что вбивается в
+    1С, и угадывать её нельзя. Вместо этого, если рядом (`warnings`
+    передан), ищем в той же категории цены, отличающиеся от указанной
+    ровно на одну цифру (5650 вместо 3650 и т.п.), и добавляем явное
+    предупреждение оператору — чтобы он перепроверил бланк, а не полагался
+    на то, что "нет соответствия" само по себе укажет на опечатку.
+    """
     mapping_list = CATALOG_MAPPING.get(category_key, [])
     target_price = item.get("unit_price_for_1c", item.get("price", 0))
+    candidates = [c for c in mapping_list if c.get("price") == target_price]
 
-    for cat_item in mapping_list:
-        if cat_item.get("price") == target_price:
-            item["name"] = cat_item["name"]
-            item["1c_search_key"] = cat_item.get("search_key", cat_item["name"])
-            item["1c_down_presses"] = cat_item.get("dropdown_index", 0)
-            return True
+    if not candidates:
+        if warnings is not None:
+            suspects = sorted(
+                (c for c in mapping_list if _digit_confusable(target_price, c.get("price", 0))),
+                key=lambda c: abs(c["price"] - target_price),
+            )[:3]
+            if suspects:
+                variants = ", ".join(f"«{c['name']}» ({c['price']} грн)" for c in suspects)
+                warnings.append(
+                    f"🔎 Похоже на ошибку распознавания цифр: «{item.get('name', '?')}» — "
+                    f"{target_price} грн, такой цены нет в каталоге 1С, но есть {variants}. "
+                    f"Сверь цену на бланке вручную!"
+                )
+        return False
 
-    return False
+    if len(candidates) > 1:
+        item_tokens = _tokenize(item.get("name", ""))
+        candidates = sorted(
+            candidates,
+            key=lambda c: len(item_tokens & _tokenize(c["name"])),
+            reverse=True,
+        )
+
+    cat_item = candidates[0]
+    item["name"] = cat_item["name"]
+    item["1c_search_key"] = cat_item.get("search_key", cat_item["name"])
+    item["1c_down_presses"] = cat_item.get("dropdown_index", 0)
+    return True
 
 
 def _process_complex_goods_and_mapping(goods: list[dict], warnings: list[str]) -> None:
@@ -107,7 +163,7 @@ def _process_complex_goods_and_mapping(goods: list[dict], warnings: list[str]) -
             category = "towels"
 
         if category:
-            mapped = _apply_1c_mapping(item, category)
+            mapped = _apply_1c_mapping(item, category, warnings)
             if not mapped:
                 item["name"] = find_best_service_name(item["name"])
         else:
@@ -186,14 +242,27 @@ def apply_business_rules_in_python(data: dict[str, Any], num_addresses: int, boo
             continue
 
         if any(kw in name_lower for kw in ["снос", "персонал", "ескорт"]):
+            # Написанная на бланке общая сумма (6200, 9600, ...) часто
+            # соответствует готовому пакету персонала — восстанавливаем
+            # реальные к-ть/цену за штуку по personnel_packages раньше,
+            # чем считаем total_staff_count и ищем карточку в 1С.
+            package = PERSONNEL_PACKAGES.get(str(int(raw_price)))
+            if package:
+                raw_qty = package["qty"]
+                s["quantity"] = raw_qty
+                s["unit_price_for_1c"] = raw_price // raw_qty
+                s["name"] = package["name"]
+
             total_staff_count += raw_qty
-            s["name"] = find_best_service_name(s["name"])
+            if not _apply_1c_mapping(s, "services", warnings):
+                s["name"] = find_best_service_name(s["name"])
             clean_services.append(s)
             continue
 
         if "церемоніймейстер" in name_lower:
             total_staff_count += 1
-            s["name"] = find_best_service_name(s["name"])
+            if not _apply_1c_mapping(s, "services", warnings):
+                s["name"] = find_best_service_name(s["name"])
             clean_services.append(s)
             continue
 
@@ -201,11 +270,13 @@ def apply_business_rules_in_python(data: dict[str, Any], num_addresses: int, boo
             goods.append(s)
             continue
 
-        s["name"] = find_best_service_name(s["name"])
+        if not _apply_1c_mapping(s, "services", warnings):
+            s["name"] = find_best_service_name(s["name"])
         clean_services.append(s)
 
     for t in transport:
-        t["name"] = find_best_service_name(t["name"])
+        if not _apply_1c_mapping(t, "services", warnings):
+            t["name"] = find_best_service_name(t["name"])
         total_vehicle_count += max(1, t.get("quantity", 1))
 
     price_extra_staff = TARIFFS.get("extra_point", 500)
@@ -214,16 +285,20 @@ def apply_business_rules_in_python(data: dict[str, Any], num_addresses: int, boo
     if num_addresses > 0:
         if total_staff_count > 0:
             qty_extra = total_staff_count * num_addresses
-            clean_services.append({
+            extra_staff = {
                 "name": "снос (доп. точка)", "price": qty_extra * price_extra_staff,
                 "quantity": qty_extra, "unit_price_for_1c": price_extra_staff
-            })
+            }
+            _apply_1c_mapping(extra_staff, "services")
+            clean_services.append(extra_staff)
         if total_vehicle_count > 0:
             qty_trans = total_vehicle_count * num_addresses
-            transport.append({
+            extra_trans = {
                 "name": "доп. точка (транспорт)", "price": qty_trans * price_extra_trans,
                 "quantity": qty_trans, "unit_price_for_1c": price_extra_trans
-            })
+            }
+            _apply_1c_mapping(extra_trans, "services")
+            transport.append(extra_trans)
 
     _process_complex_goods_and_mapping(goods, warnings)
 
