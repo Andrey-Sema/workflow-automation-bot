@@ -11,9 +11,10 @@ from __future__ import annotations
 import logging
 from functools import lru_cache
 from pathlib import Path
+from typing import Annotated
 
 from pydantic import Field, SecretStr, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +55,10 @@ class Settings(BaseSettings):
 
     # --- Telegram ---
     telegram_bot_token: SecretStr | None = Field(default=None, alias="TELEGRAM_BOT_TOKEN")
-    telegram_admin_ids: list[int] = Field(default_factory=list, alias="TELEGRAM_ADMIN_IDS")
-    telegram_operator_ids: list[int] = Field(default_factory=list, alias="TELEGRAM_OPERATOR_IDS")
+    telegram_admin_ids: Annotated[list[int], NoDecode] = Field(default_factory=list, alias="TELEGRAM_ADMIN_IDS")
+    telegram_operator_ids: Annotated[list[int], NoDecode] = Field(
+        default_factory=list, alias="TELEGRAM_OPERATOR_IDS"
+    )
     telegram_log_chat_id: int | None = Field(default=None, alias="TELEGRAM_LOG_CHAT_ID")
     telegram_max_file_mb: int = Field(default=20, alias="TELEGRAM_MAX_FILE_MB")
     # Minimum seconds between two updates from the same chat before the

@@ -34,6 +34,19 @@ def test_telegram_id_list_parsing(raw, expected):
     assert s.telegram_admin_ids == expected
 
 
+def test_single_numeric_id_via_env_var(monkeypatch):
+    """Regression: pydantic-settings JSON-decodes env values for list[int]
+    fields before validation, so a single numeric id like "506980724" (a
+    valid JSON int) used to reach the validator as `int`, not `str`, and
+    blow up with a TypeError. NoDecode on the field keeps it a raw string."""
+    monkeypatch.setenv("GEMINI_API_KEY", "abc")
+    monkeypatch.setenv("TELEGRAM_ADMIN_IDS", "506980724")
+    monkeypatch.setenv("TELEGRAM_OPERATOR_IDS", "506980724")
+    s = Settings(_env_file=None)
+    assert s.telegram_admin_ids == [506980724]
+    assert s.telegram_operator_ids == [506980724]
+
+
 def test_is_admin_and_is_operator():
     s = Settings(gemini_api_key=None, telegram_admin_ids=[1], telegram_operator_ids=[2])
     assert s.is_admin(1) is True
