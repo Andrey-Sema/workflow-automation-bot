@@ -243,14 +243,3 @@ the Dockerfile, and CI all do) sidesteps that entirely.
 
 - **No post-commit undo.** Cancelling only works before "✅ Ввести в 1С" —
   see "Using the bot" above.
-- **Field navigation needs on-site calibration.** `FieldNav` in
-  `src/onec_order_entry.py` (Tab counts between Nomenclature → Quantity →
-  Price, whether Price auto-fills) is a best-effort default; confirm against
-  the real 1C window before disabling `ONEC_DRY_RUN`.
-- **RDP/Docker build couldn't be end-to-end tested in the environment this
-  was built in** (no network access to pull base images, no real RDP/1C
-  host to connect to). `docker compose config` validates cleanly and every
-  pure-logic piece (command construction, credential precedence, field
-  sequencing in dry-run) has unit test coverage, but a real `docker compose
-  up` against your actual Windows/1C host is the first thing to try after
-  deploying.
