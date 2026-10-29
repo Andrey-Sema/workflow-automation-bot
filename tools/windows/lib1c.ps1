@@ -1,0 +1,105 @@
+# Общие функции для работы с 1С через COM (V83.COMConnector).
+# Загружается из menu.ps1, отдельно не запускается.
+#
+# PowerShell не умеет читать свойства объектов 1С через точку ($obj.Имя
+# возвращает пустоту), поэтому все обращения идут через InvokeMember.
+# Методы пробуются по очереди по списку имён "English|Русское": часть
+# методов 1С отдаёт через COM только под русским именем.
+
+$AI1C_SERVER = "WIN-GE0QRLOR8KA"
+$AI1C_BASE_NAME = "UT_2026"
+$AI1C_DEFAULT_USER = "Семушкин А."
+$AI1C_OUT = Join-Path $env:USERPROFILE "Documents\ai1c\out"
+
+function P1C($o, $n) {
+  [System.__ComObject].InvokeMember($n, [Reflection.BindingFlags]::GetProperty, $null, $o, $null)
+}
+
+function SP1C($o, $n) {
+  try { return (P1C $o $n) } catch { return $null }
+}
+
+function M1C($o, $n, $a) {
+  $last = $null
+  foreach ($nm in ($n -split '\|')) {
+    try {
+      return [System.__ComObject].InvokeMember($nm, [Reflection.BindingFlags]::InvokeMethod, $null, $o, $a)
+    } catch {
+      $last = $_
+    }
+  }
+  throw $last
+}
+
+function T1C($v) {
+  try { return (M1C $global:AI1C_CONN "String|Строка" @(,$v)) } catch { return "?" }
+}
+
+function F1C($v) {
+  try {
+    return [bool](M1C $global:AI1C_CONN "ValueIsFilled|ЗначениеЗаполнено" @(,$v))
+  } catch {
+    return ($null -ne $v -and "$v" -ne "")
+  }
+}
+
+function Items1C($coll) {
+  $list = @()
+  try { foreach ($x in $coll) { $list += $x } } catch {}
+  if ($list.Count -gt 0) { return $list }
+  try { $cnt = M1C $coll "Count|Количество" @() } catch { $cnt = 0 }
+  for ($q = 0; $q -lt $cnt; $q++) { $list += (M1C $coll "Get|Получить" @(,$q)) }
+  return $list
+}
+
+function Query1C($text) {
+  $q = M1C $global:AI1C_CONN "NewObject|НовыйОбъект" @("Запрос", $text)
+  return (M1C (M1C $q "Execute|Выполнить" @()) "Select|Выбрать" @())
+}
+
+function Connect-1C {
+  $u = Read-Host "Пользователь 1С [Enter = $AI1C_DEFAULT_USER]"
+  if (-not $u) { $u = $AI1C_DEFAULT_USER }
+  $sp = Read-Host "Пароль 1С (если без пароля - просто Enter)" -AsSecureString
+  $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sp)
+  try {
+    $p = [Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
+  } finally {
+    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+  }
+  Write-Host "Подключаюсь к 1С как $u ..."
+  $com = New-Object -ComObject V83.COMConnector
+  $global:AI1C_CONN = $com.Connect('Srvr="' + $AI1C_SERVER + '";Ref="' + $AI1C_BASE_NAME + '";Usr="' + $u + '";Pwd="' + $p + '";')
+  $global:AI1C_USER = $u
+  Write-Host "Подключено."
+}
+
+function Disconnect-1C {
+  $global:AI1C_CONN = $null
+  [GC]::Collect()
+  [GC]::WaitForPendingFinalizers()
+}
+
+function Format-Error1C($err) {
+  $lines = @("ОШИБКА: $($err.Exception.Message)")
+  if ($err.Exception.InnerException) { $lines += "ПОДРОБНО: $($err.Exception.InnerException.Message)" }
+  if ($err.InvocationInfo -and $err.InvocationInfo.Line) {
+    $lines += "СТРОКА: $($err.InvocationInfo.ScriptLineNumber): $($err.InvocationInfo.Line.Trim())"
+  }
+  return $lines
+}
+
+# Сохраняет результат в файл (его удобно переслать в чат целиком, без
+# порчи форматирования), копирует в буфер обмена и показывает файл в
+# Проводнике.
+function Save-Result($name, $lines) {
+  New-Item -ItemType Directory $AI1C_OUT -Force | Out-Null
+  $file = Join-Path $AI1C_OUT ("{0}-{1:yyyyMMdd-HHmmss}.txt" -f $name, (Get-Date))
+  $lines | Out-File -FilePath $file -Encoding utf8
+  $lines | Out-String | Set-Clipboard
+  $lines | ForEach-Object { Write-Host $_ }
+  Write-Host ""
+  Write-Host ">>> Результат сохранён в файл: $file" -ForegroundColor Green
+  Write-Host ">>> Отправьте этот файл в чат (он уже выделен в открывшемся окне)." -ForegroundColor Green
+  explorer.exe "/select,$file"
+}
