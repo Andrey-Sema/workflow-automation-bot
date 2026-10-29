@@ -9,16 +9,15 @@ $kinds = @{
   "Перечисление"     = "Enums"
 }
 
-$full = Read-Host "Полное имя объекта [Enter = Документ.ЗаказПокупателя]"
-if (-not $full) { $full = "Документ.ЗаказПокупателя" }
-$kind, $objName = $full -split '\.', 2
-
 $r = @()
 try {
-  if (-not $kinds.ContainsKey($kind)) { throw "Неизвестный вид объекта '$kind'. Допустимо: $($kinds.Keys -join ', ')" }
   Connect-1C
+  $full = Read-Host "Полное имя объекта [Enter = Документ.ЗаказПокупателя]"
+  if (-not $full) { $full = "Документ.ЗаказПокупателя" }
+  $kind, $objName = $full -split '\.', 2
+  if (-not $kinds.ContainsKey($kind)) { throw "Неизвестный вид объекта '$kind'. Допустимо: $($kinds.Keys -join ', ')" }
   $md = P1C $global:AI1C_CONN "Metadata"
-  $obj = M1C (P1C $md $kinds[$kind]) "Find|Найти" @(,$objName)
+  $obj = Find1C (P1C $md $kinds[$kind]) $objName
   if ($null -eq $obj) { throw "Объект $full не найден в конфигурации" }
 
   $r += "##### $full  ($(P1C $obj 'Synonym'))"

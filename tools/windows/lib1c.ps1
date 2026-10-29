@@ -18,16 +18,36 @@ function SP1C($o, $n) {
   try { return (P1C $o $n) } catch { return $null }
 }
 
+# Часть методов 1С (например, у коллекций метаданных) не находится при
+# вызове с одним флагом InvokeMethod, поэтому пробуем ещё и комбинацию
+# InvokeMethod|GetProperty - так же, как вызывает VBScript.
 function M1C($o, $n, $a) {
   $last = $null
+  $flagSets = @(
+    [Reflection.BindingFlags]::InvokeMethod,
+    ([Reflection.BindingFlags]::InvokeMethod -bor [Reflection.BindingFlags]::GetProperty)
+  )
   foreach ($nm in ($n -split '\|')) {
-    try {
-      return [System.__ComObject].InvokeMember($nm, [Reflection.BindingFlags]::InvokeMethod, $null, $o, $a)
-    } catch {
-      $last = $_
+    foreach ($flags in $flagSets) {
+      try {
+        return [System.__ComObject].InvokeMember($nm, $flags, $null, $o, $a)
+      } catch {
+        $last = $_
+      }
     }
   }
   throw $last
+}
+
+# Элемент коллекции метаданных по имени (Метаданные.Документы.<Имя>).
+# Сначала как свойство коллекции, если не вышло - перебором.
+function Find1C($coll, $name) {
+  $item = SP1C $coll $name
+  if ($null -ne $item) { return $item }
+  foreach ($x in (Items1C $coll)) {
+    if ((SP1C $x "Name") -eq $name) { return $x }
+  }
+  return $null
 }
 
 function T1C($v) {
@@ -56,10 +76,12 @@ function Query1C($text) {
   return (M1C (M1C $q "Execute|Выполнить" @()) "Select|Выбрать" @())
 }
 
+# Спрашивает только пароль (в отдельном окне, символы не отображаются):
+# пользователь фиксирован, чтобы пароль случайно не ввели в поле имени,
+# где он виден на экране.
 function Connect-1C {
-  $u = Read-Host "Пользователь 1С [Enter = $AI1C_DEFAULT_USER]"
-  if (-not $u) { $u = $AI1C_DEFAULT_USER }
-  $sp = Read-Host "Пароль 1С (если без пароля - просто Enter)" -AsSecureString
+  $u = $AI1C_DEFAULT_USER
+  $sp = Read-Host "Пароль 1С для пользователя $u (если без пароля - просто Enter)" -AsSecureString
   $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sp)
   try {
     $p = [Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
