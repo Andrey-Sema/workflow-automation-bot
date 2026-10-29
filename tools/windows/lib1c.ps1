@@ -71,9 +71,14 @@ function Items1C($coll) {
   return $list
 }
 
-function Query1C($text) {
+function Query1C($text, $params = @{}) {
   $q = M1C $global:AI1C_CONN "NewObject|НовыйОбъект" @("Запрос", $text)
+  foreach ($k in $params.Keys) { M1C $q "SetParameter|УстановитьПараметр" @($k, $params[$k]) | Out-Null }
   return (M1C (M1C $q "Execute|Выполнить" @()) "Select|Выбрать" @())
+}
+
+function Next1C($sel) {
+  return [bool](M1C $sel "Next|Следующий" @())
 }
 
 # Спрашивает только пароль (в отдельном окне, символы не отображаются):
@@ -93,6 +98,38 @@ function Connect-1C {
   $global:AI1C_CONN = $com.Connect('Srvr="' + $AI1C_SERVER + '";Ref="' + $AI1C_BASE_NAME + '";Usr="' + $u + '";Pwd="' + $p + '";')
   $global:AI1C_USER = $u
   Write-Host "Подключено."
+}
+
+# Подключение через V83.Application - запускает скрытый толстый клиент.
+# Нужно там, где модуль объекта не компилируется во внешнем соединении
+# (V83.COMConnector), а в клиентском контексте работает.
+function Connect-1CApp {
+  $u = $AI1C_DEFAULT_USER
+  $sp = Read-Host "Пароль 1С для пользователя $u (если без пароля - просто Enter)" -AsSecureString
+  $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sp)
+  try {
+    $p = [Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
+  } finally {
+    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+  }
+  Write-Host "Запускаю скрытый толстый клиент 1С как $u (до минуты) ..."
+  $app = New-Object -ComObject V83.Application
+  $cs = 'Srvr="' + $AI1C_SERVER + '";Ref="' + $AI1C_BASE_NAME + '";Usr="' + $u + '";Pwd="' + $p + '";'
+  try { $ok = $app.Connect($cs) } catch { $ok = M1C $app "Connect" @(,$cs) }
+  if (-not $ok) { throw "V83.Application.Connect вернул False (неверный пароль или нет лицензии)" }
+  $global:AI1C_APP = $app
+  $global:AI1C_CONN = $app
+  $global:AI1C_USER = $u
+  Write-Host "Подключено."
+}
+
+function Disconnect-1CApp {
+  if ($global:AI1C_APP) {
+    try { M1C $global:AI1C_APP "Exit|ЗавершитьРаботуСистемы" @(,$false) | Out-Null } catch {}
+    try { [Runtime.InteropServices.Marshal]::ReleaseComObject($global:AI1C_APP) | Out-Null } catch {}
+  }
+  $global:AI1C_APP = $null
+  Disconnect-1C
 }
 
 function Disconnect-1C {
