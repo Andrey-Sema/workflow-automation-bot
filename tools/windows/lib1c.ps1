@@ -9,7 +9,6 @@
 $AI1C_SERVER = "WIN-GE0QRLOR8KA"
 $AI1C_BASE_NAME = "UT_2026"
 $AI1C_DEFAULT_USER = "Семушкин А."
-$AI1C_OUT = Join-Path $env:USERPROFILE "Documents\ai1c\out"
 
 function P1C($o, $n) {
   [System.__ComObject].InvokeMember($n, [Reflection.BindingFlags]::GetProperty, $null, $o, $null)
@@ -89,17 +88,13 @@ function Format-Error1C($err) {
   return $lines
 }
 
-# Сохраняет результат в файл (его удобно переслать в чат целиком, без
-# порчи форматирования), копирует в буфер обмена и показывает файл в
-# Проводнике.
+# Выводит результат в консоль и копирует его в буфер обмена. На диск
+# ничего не сохраняется.
 function Save-Result($name, $lines) {
-  New-Item -ItemType Directory $AI1C_OUT -Force | Out-Null
-  $file = Join-Path $AI1C_OUT ("{0}-{1:yyyyMMdd-HHmmss}.txt" -f $name, (Get-Date))
-  $lines | Out-File -FilePath $file -Encoding utf8
   $lines | Out-String | Set-Clipboard
-  $lines | ForEach-Object { Write-Host $_ }
   Write-Host ""
-  Write-Host ">>> Результат сохранён в файл: $file" -ForegroundColor Green
-  Write-Host ">>> Отправьте этот файл в чат (он уже выделен в открывшемся окне)." -ForegroundColor Green
-  explorer.exe "/select,$file"
+  Write-Host "===== РЕЗУЛЬТАТ ($name) =====" -ForegroundColor Cyan
+  $lines | ForEach-Object { Write-Host $_ }
+  Write-Host "===== КОНЕЦ =====" -ForegroundColor Cyan
+  Write-Host ">>> Результат уже в буфере обмена - вставьте в чат (Ctrl+V)." -ForegroundColor Green
 }
