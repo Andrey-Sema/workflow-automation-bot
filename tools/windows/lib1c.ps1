@@ -55,6 +55,7 @@ function T1C($v) {
 }
 
 function F1C($v) {
+  if ($v -is [bool]) { return $v }
   try {
     return [bool](M1C $global:AI1C_CONN "ValueIsFilled|ЗначениеЗаполнено" @(,$v))
   } catch {
@@ -62,12 +63,15 @@ function F1C($v) {
   }
 }
 
+# Строки табличной части сами перечислимы (по значениям колонок), поэтому
+# добавляем элемент через унарную запятую - иначе += развернёт строку в
+# отдельные значения.
 function Items1C($coll) {
   $list = @()
-  try { foreach ($x in $coll) { $list += $x } } catch {}
+  try { foreach ($x in $coll) { $list += , $x } } catch {}
   if ($list.Count -gt 0) { return $list }
   try { $cnt = M1C $coll "Count|Количество" @() } catch { $cnt = 0 }
-  for ($q = 0; $q -lt $cnt; $q++) { $list += (M1C $coll "Get|Получить" @(,$q)) }
+  for ($q = 0; $q -lt $cnt; $q++) { $list += , (M1C $coll "Get|Получить" @(,$q)) }
   return $list
 }
 
